@@ -24,8 +24,16 @@ const ROOM_R = 9
 const WALL_H = 4.6
 const ROWS = 5
 const COLS = 40
-/** How close to the wall you may walk, so you never press your face into a screen. */
-const WALK_R = ROOM_R - 1.1
+/**
+ * How close to the wall you may walk.
+ *
+ * Set by the camera rather than by your face. The camera has to stay inside the shell too,
+ * and it can only do that by shortening its leash — so the gap left here between where you
+ * can stand and where the wall is has to be wide enough to hold the shortest leash that is
+ * still a camera rather than a view from inside your own helmet. Two units and a bit buys
+ * that; a wider walking circle buys a camera in the back of your head.
+ */
+const WALK_R = ROOM_R - 2.2
 
 /**
  * Panel colour by thread status. Deliberately the astronauts' own trim palette rather than
@@ -126,6 +134,19 @@ export class CommandDeck {
 
   bounds() {
     return { x: ORIGIN.x, z: ORIGIN.z, r: WALK_R }
+  }
+
+  /**
+   * What the camera has to stay inside — the shell itself rather than the walking circle,
+   * pulled in far enough that it never sits exactly on a panel and reads it edge-on.
+   */
+  cameraBounds() {
+    return {
+      x: ORIGIN.x,
+      z: ORIGIN.z,
+      r: ROOM_R - 0.45,
+      ceiling: ORIGIN.y + WALL_H + 0.9 - 0.35,
+    }
   }
 
   /**

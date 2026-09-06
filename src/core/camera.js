@@ -11,6 +11,15 @@ const MAX_DIST = 150
  * dot moving on it — and one closer than this is inside the helmet.
  */
 const WALK_DIST = { min: 4, max: 30, rest: 9 }
+/**
+ * Indoors, where the wall is nine units from the middle of the room and the walking rest
+ * distance is also nine. Left alone, the camera sits exactly in the wall it is meant to be
+ * showing you — and since the shell only draws its inside faces, the result is not a camera
+ * buried in geometry but a room whose walls quietly vanish behind you.
+ */
+const INTERIOR_DIST = { min: 1.8, max: 6.4, rest: 3.6 }
+/** Nearly level. A room is looked across; only a landscape is looked down on. */
+const INTERIOR_POLAR = THREE.MathUtils.degToRad(80)
 /** Nearer the horizon than the map's isometric rest: walking, you want to see ahead. */
 const WALK_POLAR = THREE.MathUtils.degToRad(68)
 const WORLD_LIMIT = 82
@@ -70,6 +79,10 @@ export class CameraRig {
     this.desiredDistance = 62
     /** True while the camera is following an astronaut you are steering. */
     this.walking = false
+    /** Indoors: the same follow camera, on a leash short enough for a room. */
+    this.interior = false
+    /** The shell it must stay inside while it is, or null out on the surface. */
+    this.interiorRoom = null
     this._mapView = null
 
     this.idleFor = 0
@@ -249,8 +262,9 @@ export class CameraRig {
     const raw = (e.deltaY * unit) / 100
     const step = Math.sign(raw) * Math.min(Math.abs(raw), 2.5) * (e.ctrlKey ? 1.6 : 1)
 
-    const lo = this.walking ? WALK_DIST.min : MIN_DIST
-    const hi = this.walking ? WALK_DIST.max : MAX_DIST
+    const dist = this.interior ? INTERIOR_DIST : WALK_DIST
+    const lo = this.walking ? dist.min : MIN_DIST
+    const hi = this.walking ? dist.max : MAX_DIST
     this.desiredDistance = THREE.MathUtils.clamp(this.desiredDistance * (1 + step * 0.16), lo, hi)
     // Hold the point under the pointer still for as long as the dolly takes to settle —
     // except when following somebody, where the point under the pointer is not staying put.
@@ -317,6 +331,29 @@ export class CameraRig {
   snapTo(point) {
     this.desiredTarget.set(point.x, point.y, point.z)
     this.target.set(point.x, point.y, point.z)
+  }
+
+  /**
+   * Step into or out of a room. Only the leash changes — it is the same follow camera, and
+   * making it a second mode would mean a second set of everything that can go wrong.
+   */
+  setInterior(room) {
+    const on = Boolean(room)
+    this.interiorRoom = room || null
+    if (on === this.interior) return
+    this.interior = on
+    if (on) {
+      this._outdoor = { distance: this.desiredDistance, polar: this.desiredPolar }
+      this.desiredDistance = INTERIOR_DIST.rest
+      this.desiredPolar = INTERIOR_POLAR
+      // Snapped as well as desired: easing in from nine units means starting the shot from
+      // outside the wall, which is the exact frame this exists to prevent.
+      this.distance = INTERIOR_DIST.rest
+    } else if (this._outdoor) {
+      this.desiredDistance = this._outdoor.distance
+      this.desiredPolar = this._outdoor.polar
+      this._outdoor = null
+    }
   }
 
   /**
@@ -472,13 +509,45 @@ export class CameraRig {
     this._sync()
   }
 
+  /**
+   * How much of the leash actually fits in the room.
+   *
+   * A follow camera trails its subject, and a subject who may stand a metre from the wall
+   * trails it straight through one — you end up outside the hull looking back at the void,
+   * which is the one thing an interior may never show you. Shrinking the circle you can
+   * walk in would fix it too, and would make a nine metre room feel like five; shortening
+   * the camera's own leash when a wall is behind it is what third-person cameras have
+   * always done instead, and it only costs anything in the corner where it is needed.
+   */
+  _fitInside(d, sinP, room) {
+    const ux = sinP * Math.sin(this.azimuth)
+    const uz = sinP * Math.cos(this.azimuth)
+    const ox = this.target.x - room.x
+    const oz = this.target.z - room.z
+    // Where the ray out of the subject's back meets the wall: the positive root of
+    // |o + t·u|² = r². `a` vanishes only looking straight down, which the polar never is.
+    const a = ux * ux + uz * uz
+    if (a > 1e-6) {
+      const b = ox * ux + oz * uz
+      const c = ox * ox + oz * oz - room.r * room.r
+      const disc = b * b - a * c
+      if (disc > 0) d = Math.min(d, (-b + Math.sqrt(disc)) / a)
+    }
+    // The ceiling is the same problem on the other axis, and a simpler one.
+    const uy = Math.cos(this.polar)
+    if (uy > 1e-6) d = Math.min(d, (room.ceiling - this.target.y) / uy)
+    // Never all the way in: a camera at zero is inside the astronaut's head.
+    return Math.max(d, 0.9)
+  }
+
   /** Place the camera from the current spherical state and make its matrices current. */
   _sync() {
     const sinP = Math.sin(this.polar)
+    const d = this.interiorRoom ? this._fitInside(this.distance, sinP, this.interiorRoom) : this.distance
     this.camera.position.set(
-      this.target.x + this.distance * sinP * Math.sin(this.azimuth),
-      this.target.y + this.distance * Math.cos(this.polar),
-      this.target.z + this.distance * sinP * Math.cos(this.azimuth)
+      this.target.x + d * sinP * Math.sin(this.azimuth),
+      this.target.y + d * Math.cos(this.polar),
+      this.target.z + d * sinP * Math.cos(this.azimuth)
     )
     this.camera.lookAt(this.target)
     // Raycasts during a drag read these directly, so they cannot wait for the render pass.

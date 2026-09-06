@@ -525,6 +525,7 @@ function stopWalk() {
   // Letting go while aboard would strand the astronaut on a deck six hundred units under
   // the colony, walking its errands underground for the rest of the session.
   if (colony.aboard) colony.leaveShip()
+  rig.setInterior(null)
   atHatch = false
   walkingId = null
   held.clear()
@@ -539,6 +540,7 @@ function stopWalk() {
 colony.astronauts.onReleased = () => {
   if (!walkingId) return
   if (colony.aboard) colony.leaveShip()
+  rig.setInterior(null)
   atHatch = false
   walkingId = null
   rig.setWalking(false)
@@ -573,6 +575,7 @@ function toggleAboard() {
   if (colony.aboard) {
     const agent = colony.leaveShip()
     if (agent) {
+      rig.setInterior(null)
       rig.snapTo(agent.pos)
       engine.setFocusScale(0.3)
       hud.hint('Back on the surface · E at the ramp to go aboard again')
@@ -585,6 +588,7 @@ function toggleAboard() {
   if (Math.hypot(agent.pos.x - door.x, agent.pos.z - door.z) > HATCH_RANGE) return
   const aboard = colony.boardShip()
   if (!aboard) return
+  rig.setInterior(colony.deck.cameraBounds())
   rig.snapTo(aboard.pos)
   // The deck is a room, not a landscape: the shallow focus that makes the colony read as a
   // model on a table has nothing to do here but blur the far wall.
