@@ -42,7 +42,7 @@ somebody writing that adapter.
 | [Codex CLI](https://developers.openai.com/codex/cli) (OpenAI) | ⬜ Not yet — transcripts found at `~/.codex/sessions/`, [notes here](server/harnesses/README.md#starting-points) |
 | [OpenCode](https://opencode.ai) | ⬜ Not yet |
 | [Antigravity CLI](https://antigravity.google) (Google) | ⬜ Not yet — the successor to Gemini CLI, which Google stopped serving individual accounts on 18 June 2026 |
-| [Cursor](https://cursor.com) (`cursor-agent`) | ⬜ Not yet |
+| [Cursor](https://cursor.com) (`cursor-agent`) | ✅ **Supported** — the CLI's own sessions. Cursor writes no live-process file, so "running" is inferred from having been written in the last few minutes, and it keeps no archived state, so archiving is recorded on the colony's side only. The IDE's chats are not read: they live in a SQLite database the editor holds open and which runs to tens of gigabytes on a well-used machine |
 | [Amp](https://ampcode.com) (Sourcegraph) | ⬜ Not yet |
 | [Aider](https://aider.chat) | ⬜ Not yet |
 | [Goose](https://block.github.io/goose/) (Block) | ⬜ Not yet |
@@ -288,17 +288,21 @@ under **View → Return to isometric**.
 or whoever is nearest the middle of the view if nobody is — asking you to pick somebody
 first would make it two steps, and the whole appeal is that it is one.
 
-`WASD` or the arrows walk, `⇧` runs, `space` hops, dragging looks around, and `Esc` gives
-them back. The astronaut you are wearing turns **blue** — suit, trim and eyes — because
-every other one on the surface is a near-white by design, and finding yourself in a crowd of
-four hundred should be a glance rather than a search.
+`WASD` or the arrows walk, `⇧` runs, `space` hops — further than you would expect, which has
+a section of its own below — dragging looks around, and `Esc` gives them back. The astronaut
+you are wearing turns **blue** — a pale blue suit, a navy backpack, blue eyes — because every
+other one on the surface is a near-white by design, and finding yourself in a crowd of four
+hundred should be a glance rather than a search. The pack carries a colour of its own rather
+than the trim's, because the trim is also what the chest lamp glows, and a lamp painted navy
+is a lamp that has gone out.
 
 Almost none of this is new machinery, which is the point:
 
 - The astronaut is one of the crew with its own state machine suspended. It keeps its
   thread, its badge and its card; it simply stops being told where to go.
 - Collision is the same nav grid every other astronaut is already sliding against, so you
-  cannot walk through a habitat and neither can they.
+  cannot walk through a habitat and neither can they. What that grid holds *for you* is not
+  quite what it holds for them, which is the one line here that needs a footnote — below.
 - The camera is the same Google Earth rig with its target pinned to a moving point instead
   of a still one. Its map framing is put away on the way in and handed straight back on the
   way out, so a mode can never lose you your view.
@@ -312,6 +316,42 @@ a few metres out and everything past it is fog.
 
 A thread that gets archived, or drops out of a scan, takes its astronaut back — you land on
 the map with a note saying so, rather than following a ghost.
+
+### What stops you is not what stops them
+
+The crew's obstacles are drawn generously, and they should be: four hundred astronauts
+routing past one another need room, or they spend the day appearing to scrape the walls.
+Every crate, boulder and solar panel is in that set as well — an idler parked inside a solar
+panel is a bug, and the cheapest way never to have it is to make the panel solid.
+
+Handed to somebody holding the keys, all of that generosity turns into a wall you can see
+through and cannot cross. That is the same broken argument as a crowd shoving you off your
+heading, and it gets the same answer: the grid keeps a second map, and you walk on that one.
+It holds only what you could not plausibly get past — buildings and the ship — and it holds
+them tighter, at `0.08` against the crew's `0.26` and two thirds of a building's footprint
+against four fifths. Ground clutter and scatter are not in it at all.
+
+What that buys is small and worth having. You stride over a crate rather than stopping dead
+at one, and a gap between two habitats that you can plainly see through is a gap you fit
+through. The crew is untouched: it walks the map it always walked, so none of this makes the
+colony look sloppier from the outside.
+
+### The hop is lunar
+
+`space` used to be an Earth-height bounce — up about half a body height, back down inside
+six tenths of a second. On a body this place is explicitly not on, that read as a stumble.
+
+Gravity is now a little over a third of what it was, which puts the top of the arc just
+under two units up — half again the astronaut's own height, enough to clear a habitat roof
+— and keeps you there for one and three quarter seconds. Not the literal sixth of Earth: that hangs you
+in the air for three and a half seconds, long enough to stop reading as weightless and start
+reading as a dropped frame.
+
+Two things follow from the longer arc. Steering in the air drops to a fraction of the
+acceleration you have on the ground, so a running hop carries the speed you left with and
+becomes a long low leap instead of a walk through the air. And the jump clip, authored for a
+short hop and holding its last frame once it runs out, is slowed to cover the airtime —
+otherwise you strike the landing pose most of a second before you land.
 
 ### The grid had to grow first
 
@@ -327,6 +367,25 @@ cannot reallocate seven typed arrays twice a poll.
 The one place that treats the edge differently is you: off the end of the grid counts as
 walkable for an astronaut under a hand, so you can walk out onto the empty ground and look
 back at the place.
+
+### And the ground had to flatten with it
+
+The same bug, one layer down, and it had been sitting behind the first one the whole time.
+The world is kept flat where the colony lives and ramps into hills over the next forty
+metres, so that nothing ever builds on a slope but the horizon still has shape to it. Where
+the colony lives was a fixed forty-six units.
+
+Two hundred repos spiral their plots out past ninety, exactly as before. So the hills were
+ramping in from forty and the craters landing from sixty, straight over the top of the outer
+zones — and a deck laid at its own height into ground that has risen several metres above it
+is a deck you cannot see. The hexagons out there were never missing. They were underneath
+the world.
+
+The flat middle now grows to cover whatever the colony has actually spread to, taken from
+the same reach the navigable grid is sized by, so the two can never disagree about where the
+colony is. It is module state rather than a value handed around, because the displaced mesh
+and the samplers that sit the ship, the plots and the scatter on top of it have to agree to
+the millimetre — and the symptom of their disagreeing is a colony that floats.
 
 ## Planets and light
 
