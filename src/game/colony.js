@@ -664,26 +664,31 @@ export class Colony {
    * changes underneath you is one you cannot learn the position of. A repo is stable, there
    * are fewer of them than there are panels, and it is the thing you actually think in.
    *
-   * Rolled up live rather than at scan time: a thread changes what it is doing between
-   * polls, and a wall that only moved when the disk did would be a photograph.
+   * Counted off `threads` and not off the crew, which is the whole reason this is worth a
+   * comment. The astronaut pool is a fixed number of instances — ninety here — and the
+   * roster fills it busiest-repo-first, so the crew you can see on the surface covers only
+   * the first handful of repos. Rolling the wall up from astronauts showed eleven repos out
+   * of a hundred and seventy-one and looked for all the world like a rendering bug. The
+   * threads are the truth; the astronauts are a sample of them that happens to fit.
    */
   syncDeck() {
     if (!this.aboard) return
+    const now = Date.now()
     const byProject = new Map()
-    for (const agent of this.astronauts.agents) {
-      if (agent.state === 'gone' || agent.state === 'leaving') continue
-      const key = agent.thread?.project || 'unknown'
+    for (const thread of this.threads.values()) {
+      const key = thread.project || 'unknown'
       let row = byProject.get(key)
       if (!row) row = byProject.set(key, { counts: {}, total: 0, harness: '', title: '', rank: 99 }).get(key)
       row.total++
-      row.counts[agent.status] = (row.counts[agent.status] || 0) + 1
-      if (!row.harness) row.harness = agent.thread?.harnessName || agent.thread?.harness || ''
+      const status = statusFor(thread, now)
+      row.counts[status] = (row.counts[status] || 0) + 1
+      if (!row.harness) row.harness = thread.harnessName || thread.harness || ''
       // Carry the worst thread's title: it is the one sentence saying why this repo is lit,
       // and STATUS_ORDER is already written worst first, so its index is the ranking.
-      const rank = STATUS_ORDER.indexOf(agent.status)
+      const rank = STATUS_ORDER.indexOf(status)
       if (rank >= 0 && rank < row.rank) {
         row.rank = rank
-        row.title = agent.thread?.title || ''
+        row.title = thread.title || ''
       }
     }
 
