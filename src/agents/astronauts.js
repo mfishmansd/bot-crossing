@@ -43,7 +43,7 @@ const SUIT_TONES = [0xf3f1ec, 0xe8e4dc, 0xf7f4ee, 0xdfe4e8, 0xf1e9df]
  * The astronaut under your hand. `pack` is separate from `trim` because the trim colour is
  * also what the chest lamp glows, and a lamp painted navy is a lamp that has gone out.
  */
-const DRIVE_LOOK = { suit: 0x9fc7f2, trim: 0x4f7ec9, pack: 0x1b3566, eye: [0.45, 1.5, 3.0] }
+const DRIVE_LOOK = { suit: 0x6eaef2, trim: 0x4f7ec9, pack: 0x1b3566, eye: [0.45, 1.5, 3.0] }
 
 /** Trim + eye colour per behaviour. Eyes are pushed past 1.0 so the bloom pass catches them. */
 const AGENT_LOOK = {
