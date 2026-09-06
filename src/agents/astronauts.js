@@ -264,6 +264,23 @@ export class Astronauts {
       mesh.frustumCulled = false // one bounding volume for every agent everywhere is useless
       this.group.add(mesh)
     }
+
+    // The badge on the back of the astronaut you are wearing. One ordinary mesh rather
+    // than a per-instance texture on the pack, because exactly one astronaut ever wears
+    // it: teaching four hundred packs to sample an atlas so that one of them can show a
+    // logo is the wrong trade, and a single plane moved to the right pack each frame is
+    // the whole of the job. Its artwork comes from `setLogo`, with a plain P until then.
+    if (this.logo) this.group.remove(this.logo)
+    this.logo = new THREE.Mesh(
+      new THREE.PlaneGeometry(R * 0.62, R * 0.62),
+      new THREE.MeshBasicMaterial({ map: this._logoTexture(), transparent: true, toneMapped: false, depthWrite: false })
+    )
+    this.logo.matrixAutoUpdate = false
+    this.logo.frustumCulled = false
+    this.logo.visible = false
+    this.group.add(this.logo)
+    this._loadLogo()
+
     this._applyShadowFlags()
 
     // Ground rings for hover + selection. Two ordinary meshes, moved around as needed.
@@ -410,6 +427,65 @@ export class Astronauts {
    * `depthWrite` is off because this is transparent now: with it on, the cap would write
    * depth across its whole rectangle and punch a hole in anything drawn behind it later.
    */
+  /**
+   * The decal's canvas. Starts as a plain P so the pack is never blank, and is redrawn
+   * with whatever `setLogo` brings in. Transparent everywhere the artwork is not, so the
+   * pack's own colour is the badge's background.
+   */
+  _logoTexture() {
+    const canvas = document.createElement('canvas')
+    canvas.width = 256
+    canvas.height = 256
+    const c = canvas.getContext('2d')
+    c.clearRect(0, 0, 256, 256)
+    c.font = 'bold 170px ui-sans-serif, system-ui, sans-serif'
+    c.textAlign = 'center'
+    c.textBaseline = 'middle'
+    c.fillStyle = 'rgba(245,247,250,0.96)'
+    c.fillText('P', 128, 138)
+    this._logoCanvas = canvas
+    const texture = new THREE.CanvasTexture(canvas)
+    texture.colorSpace = THREE.SRGBColorSpace
+    texture.minFilter = THREE.LinearFilter
+    texture.magFilter = THREE.LinearFilter
+    texture.generateMipmaps = false
+    texture.anisotropy = 8
+    this._logoTex = texture
+    return texture
+  }
+
+  /**
+   * Put an image on the badge. The URL is kept so a rebuild of the meshes redraws it, and
+   * the load is tolerated failing — a missing file leaves the P, not a hole. It is meant to
+   * point somewhere gitignored: the artwork is yours, and this repository is public.
+   */
+  setLogo(url) {
+    this._logoUrl = url
+    this._loadLogo()
+  }
+
+  _loadLogo() {
+    const url = this._logoUrl
+    const canvas = this._logoCanvas
+    if (!url || !canvas) return
+    const img = new Image()
+    img.onload = () => {
+      if (this._logoUrl !== url) return
+      // Fitted with a margin and its own ratio kept: a badge that fills the pack edge to
+      // edge reads as wallpaper, and a stretched mark is a different mark.
+      const pad = 22
+      const box = 256 - pad * 2
+      const scale = Math.min(box / img.width, box / img.height)
+      const w = img.width * scale
+      const h = img.height * scale
+      const c = canvas.getContext('2d')
+      c.clearRect(0, 0, 256, 256)
+      c.drawImage(img, (256 - w) / 2, (256 - h) / 2, w, h)
+      this._logoTex.needsUpdate = true
+    }
+    img.src = url
+  }
+
   _faceMaterial() {
     const mat = new THREE.MeshBasicMaterial({
       map: this.faceTexture,
@@ -1432,6 +1508,7 @@ export class Astronauts {
     let i = 0
     let hands = 0
     let staticDirty = false
+    if (this.logo) this.logo.visible = false
     for (const agent of this.agents) {
       if (agent.state === 'gone') continue
       const s = agent.scale
@@ -1464,6 +1541,15 @@ export class Astronauts {
         attachMatrixAt(rig, agent.frame, this.chestSlot, bone)
         worn.multiplyMatrices(root, bone)
         setPart(child, worn, pack, i, 0, P.packUp, P.packZ, 0, 0, 0)
+        if (agent.driven && this.logo) {
+          // The badge rides the pack: same frame, pushed out to the pack's back face and
+          // turned a half circle so it looks out of it rather than into it.
+          _ce.set(0, Math.PI, 0)
+          _cq.setFromEuler(_ce)
+          _cv.set(0, P.packUp, P.packZ - P.helmetR * 0.275 - 0.006)
+          this.logo.matrix.compose(_cv, _cq, _cs).premultiply(worn)
+          this.logo.visible = true
+        }
         setPart(child, worn, lamp, i, 0, P.lightY, P.lightZ, 0, 0, 0)
 
         // The hammer only exists while a thread is running, so it gets its own instance

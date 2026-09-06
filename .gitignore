@@ -21,3 +21,7 @@ recordings
 
 # Worktrees created by Claude Code sessions — never part of the project.
 .claude/worktrees/
+
+# Your own artwork for the game — the badge on your pack, say. Served, never committed:
+# this repository is public and the marks in here are not.
+public/assets/local/

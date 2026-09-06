@@ -48,6 +48,9 @@ if (!hasStoredSettings()) settings.applyPreset(DEFAULT_PRESET)
 const engine = new Engine(settings).mount(app)
 const rig = new CameraRig(engine.camera, engine.canvas, settings)
 const colony = new Colony(engine.scene, settings, engine.camera, engine.renderer)
+// The badge on your own pack. Served from a gitignored folder: it is your mark, and the
+// repository is public. If the file is not there you get a plain P and nothing breaks.
+colony.astronauts.setLogo(`${import.meta.env.BASE_URL}assets/local/privion-mark.svg`)
 
 let state = { archived: [], archivedAt: {}, opened: [], plots: {}, seen: {} }
 let threads = []
