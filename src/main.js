@@ -210,8 +210,8 @@ const actions = {
     }
   },
 
-  openThread: async () => {
-    const thread = threads.find((t) => t.id === selectedId)
+  openThread: async (which = threads.find((t) => t.id === selectedId)) => {
+    const thread = which
     if (!thread) return
     try {
       await openThread(thread)
@@ -224,8 +224,8 @@ const actions = {
     }
   },
 
-  archiveThread: async () => {
-    const thread = threads.find((t) => t.id === selectedId)
+  archiveThread: async (which = threads.find((t) => t.id === selectedId)) => {
+    const thread = which
     if (!thread) return
     try {
       const res = await archiveThread(thread, true)
@@ -489,6 +489,14 @@ const WALK_KEYS = new Set(['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowlef
 const HATCH_RANGE = 3.2
 /** Whether the prompt is currently showing, so it is written once rather than every frame. */
 let atHatch = false
+/**
+ * Aboard: the panel in the middle of the view, and the one that is about to be. A panel has
+ * to hold the centre for a few frames before it counts, or a drag across the wall would
+ * change the sidebar forty times on its way past — the dead zone is time, not angle.
+ */
+let deckFacing = -1
+let deckCandidate = -1
+let deckCandidateFrames = 0
 
 function nearestAgent() {
   let best = null
@@ -526,6 +534,8 @@ function stopWalk() {
   // the colony, walking its errands underground for the rest of the session.
   if (colony.aboard) colony.leaveShip()
   rig.setInterior(null)
+  colony.deck.setFocused(-1)
+  deckFacing = deckCandidate = -1
   atHatch = false
   walkingId = null
   held.clear()
@@ -541,6 +551,8 @@ colony.astronauts.onReleased = () => {
   if (!walkingId) return
   if (colony.aboard) colony.leaveShip()
   rig.setInterior(null)
+  colony.deck.setFocused(-1)
+  deckFacing = deckCandidate = -1
   atHatch = false
   walkingId = null
   rig.setWalking(false)
@@ -569,12 +581,55 @@ function updateHatchPrompt() {
 }
 const _hatch = new THREE.Vector3()
 
+/**
+ * Aboard, looking at a panel is selecting its repo.
+ *
+ * The sidebar follows the middle of the view exactly as it follows a click on a zone, so
+ * every key that works on the map works from in here on whatever you are looking at. The
+ * deck never grows a second way of doing anything; it is another way of pointing.
+ */
+function updateDeckFacing() {
+  if (!colony.aboard) return
+  const panel = colony.deck.facing(rig.target, rig.azimuth, rig.polar)
+  if (panel !== deckCandidate) {
+    deckCandidate = panel
+    deckCandidateFrames = 0
+    return
+  }
+  if (++deckCandidateFrames < 6 || panel === deckFacing) return
+  deckFacing = panel
+  colony.deck.setFocused(panel)
+  const entry = colony.deck.entryAt(panel)
+  if (!entry) return
+  selectProject(entry.project)
+  hud.hint(`${entry.project} · Enter opens · C new thread · A archives · N next needing you · E leave`)
+}
+
+/** The thread a facing panel stands for — the one that most needs you in that repo. */
+function facingThread() {
+  const entry = colony.aboard ? colony.deck.entryAt(deckFacing) : null
+  return entry?.threadId ? threads.find((t) => t.id === entry.threadId) || null : null
+}
+
+/** N, aboard: turn to the next panel that wants you instead of flying off the deck. */
+function turnToNextUrgent() {
+  const panel = colony.deck.nextUrgent(deckFacing)
+  if (panel < 0) {
+    hud.hint('Nothing on the wall needs you')
+    return
+  }
+  rig.turnTo(colony.deck.panelCenter(panel, _hatch))
+}
+
 /** Aboard, or back out. The camera is snapped rather than flown; the deck is a long way down. */
 function toggleAboard() {
   if (!walkingId) return
   if (colony.aboard) {
     const agent = colony.leaveShip()
     if (agent) {
+      deckFacing = deckCandidate = -1
+      colony.deck.setFocused(-1)
+      select(walkingId, {})
       rig.setInterior(null)
       rig.snapTo(agent.pos)
       engine.setFocusScale(0.3)
@@ -595,7 +650,7 @@ function toggleAboard() {
   // to full strength, which made the one place with text in it the blurriest in the game.
   engine.setFocusScale(0.08)
   atHatch = false
-  hud.hint('The command deck · every panel is a thread · E to step back outside')
+  hud.hint('The command deck · look at a repo to select it · N next needing you · E to leave')
 }
 
 /** Held keys → a direction in the camera's frame, written straight onto the agent. */
@@ -736,6 +791,28 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault()
     toggleAboard()
     return
+  }
+
+  // Aboard, the keys that act on a thread act on the one you are looking at. They fall
+  // through to the map's handlers otherwise, which would act on the astronaut you are
+  // wearing — not wrong exactly, but never what you meant while facing a wall of repos.
+  if (colony.aboard) {
+    if (key === 'n') {
+      e.preventDefault()
+      turnToNextUrgent()
+      return
+    }
+    if (e.key === 'Enter' || key === 'a') {
+      const thread = facingThread()
+      if (!thread) {
+        hud.hint('Look at a repo first')
+        return
+      }
+      e.preventDefault()
+      if (e.key === 'Enter') actions.openThread(thread)
+      else actions.archiveThread(thread)
+      return
+    }
   }
 
   if (walkingId && WALK_KEYS.has(key)) {
@@ -969,6 +1046,7 @@ engine.add({
   update(dt, elapsed) {
     if (walkingId) driveInput()
     updateHatchPrompt()
+    updateDeckFacing()
     rig.update(dt)
     colony.update(dt, elapsed, rig.target)
     // Whatever the camera is orbiting is what should be in focus.

@@ -146,6 +146,10 @@ export class CommandDeck {
     this._one = new THREE.Vector3(1, 1, 1)
     /** Base colour and drift phase per panel, so the wall breathes instead of strobing. */
     this.panels = []
+    /** What each panel is currently showing, by panel index; null where nothing is. */
+    this._byPanel = []
+    /** The panel in the middle of the view, or -1. Drawn brighter; see `setFocused`. */
+    this.focused = -1
 
     this._buildShell()
     this._buildScreens()
@@ -444,6 +448,7 @@ export class CommandDeck {
     // between them, so everything below indexes by panel and never by rank.
     const byPanel = new Array(panels.length).fill(null)
     for (let k = 0; k < entries.length && k < this.order.length; k++) byPanel[this.order[k]] = entries[k]
+    this._byPanel = byPanel
     // Redrawing two hundred cells of text is cheap next to a poll and ruinous next to a
     // frame, so it happens only when the wall is actually showing something else. Colour
     // still follows every sync: a thread changing what it is doing is a tint, not a redraw.
@@ -473,11 +478,98 @@ export class CommandDeck {
       // dips to seven tenths is a panel that spends half its time unreadable.
       const flicker = 0.86 + 0.14 * Math.sin(elapsed * 1.7 + p.phase * Math.PI * 2)
       p.gain = p.gain > 1 ? Math.max(1, p.gain - dt * 1.6) : 1
-      const k = flicker * p.gain
+      // The panel you are looking at is held bright and still. Brighter says "this one";
+      // still says it, too — a thing that stops breathing when you look at it is a thing
+      // that has noticed you.
+      const k = i === this.focused ? 1.7 : flicker * p.gain
       c.setRGB(p.base[0] * k, p.base[1] * k, p.base[2] * k)
       this.screens.setColorAt(i, c)
     }
     this.screens.instanceColor.needsUpdate = true
+  }
+
+  /** What a panel is showing, or null for a dark one. */
+  entryAt(panel) {
+    return panel >= 0 ? this._byPanel[panel] || null : null
+  }
+
+  setFocused(panel) {
+    this.focused = panel
+  }
+
+  /** A panel's centre, in world units. */
+  panelCenter(panel, out = new THREE.Vector3()) {
+    const col = panel % COLS
+    const row = Math.floor(panel / COLS)
+    const a = (col / COLS) * Math.PI * 2
+    return out.set(
+      ORIGIN.x + Math.sin(a) * ROOM_R,
+      ORIGIN.y + 0.55 + (row + 0.5) * (WALL_H / ROWS),
+      ORIGIN.z + Math.cos(a) * ROOM_R
+    )
+  }
+
+  /**
+   * Which panel the middle of the view lands on.
+   *
+   * The camera sits behind the point it is aimed at, so the line of sight runs from the
+   * camera through that point and on to the wall; this is where it meets the wall, as a
+   * panel index, or -1 in the gaps above the top row and below the bottom one. Computed
+   * from the camera's actual bearing and pitch rather than the ones it is easing toward,
+   * so a selection follows what is on screen, not what will be.
+   */
+  facing(aim, azimuth, polar) {
+    const sinP = Math.sin(polar)
+    const dx = -sinP * Math.sin(azimuth)
+    const dy = -Math.cos(polar)
+    const dz = -sinP * Math.cos(azimuth)
+    const ox = aim.x - ORIGIN.x
+    const oz = aim.z - ORIGIN.z
+    // Where the ray leaves the room's circle: the positive root of |o + t·d|² = r².
+    const a = dx * dx + dz * dz
+    if (a < 1e-9) return -1
+    const b = ox * dx + oz * dz
+    const c = ox * ox + oz * oz - ROOM_R * ROOM_R
+    const disc = b * b - a * c
+    if (disc <= 0) return -1
+    const t = (-b + Math.sqrt(disc)) / a
+    const hy = aim.y - ORIGIN.y + t * dy
+    const row = Math.floor((hy - 0.55) / (WALL_H / ROWS))
+    if (row < 0 || row >= ROWS) return -1
+    const angle = Math.atan2(ox + t * dx, oz + t * dz)
+    let col = Math.round((angle / (Math.PI * 2)) * COLS) % COLS
+    if (col < 0) col += COLS
+    return row * COLS + col
+  }
+
+  /**
+   * The next panel round the wall that wants you, starting just past the one given. Swept
+   * column by column and eye-level row first within each, so pressing it repeatedly walks
+   * you round the room rather than bouncing you between the ceiling and the floor.
+   */
+  nextUrgent(from) {
+    // One fixed lap of the room — column by column, eye-level row first within each — and
+    // the search simply starts one place past wherever you are on it. The first version
+    // stepped by column and took the first urgent panel in each, which silently dropped
+    // every column's second urgent repo: fifty-four wanted, thirty-two ever reached.
+    if (!this._sweep) {
+      this._sweep = []
+      this._sweepIndex = new Int32Array(ROWS * COLS)
+      for (let col = 0; col < COLS; col++) {
+        for (const row of ROW_FILL) {
+          this._sweepIndex[row * COLS + col] = this._sweep.length
+          this._sweep.push(row * COLS + col)
+        }
+      }
+    }
+    const lap = this._sweep
+    const start = from >= 0 ? this._sweepIndex[from] : -1
+    for (let step = 1; step <= lap.length; step++) {
+      const panel = lap[(start + step) % lap.length]
+      const entry = this._byPanel[panel]
+      if (entry && (entry.status === 'waiting' || entry.status === 'blocked')) return panel
+    }
+    return -1
   }
 
   dispose() {

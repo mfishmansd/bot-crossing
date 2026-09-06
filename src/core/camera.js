@@ -344,6 +344,29 @@ export class CameraRig {
   }
 
   /**
+   * Turn to put a world point in the middle of the view, without moving.
+   *
+   * The camera sits behind whatever it is aimed at, so "facing a point" means standing on
+   * the far side of the aim point from it: the azimuth is the point's bearing plus a half
+   * turn, and the pitch is however far above or below the aim point it sits. Taken the short
+   * way round, or asking for the panel just to your right could send you the long way
+   * through three hundred degrees of wall.
+   */
+  turnTo(point) {
+    const dx = point.x - this.desiredTarget.x
+    const dz = point.z - this.desiredTarget.z
+    const want = Math.atan2(dx, dz) + Math.PI
+    let delta = (want - this.desiredAzimuth) % (Math.PI * 2)
+    if (delta > Math.PI) delta -= Math.PI * 2
+    if (delta < -Math.PI) delta += Math.PI * 2
+    this.desiredAzimuth += delta
+    const up = Math.atan2(point.y - this.desiredTarget.y, Math.hypot(dx, dz))
+    const maxPolar = this.interior ? INTERIOR_POLAR_MAX : MAX_POLAR
+    this.desiredPolar = THREE.MathUtils.clamp(Math.PI / 2 + up, MIN_POLAR, maxPolar)
+    this.idleFor = 0
+  }
+
+  /**
    * Step into or out of a room. Only the leash changes — it is the same follow camera, and
    * making it a second mode would mean a second set of everything that can go wrong.
    */

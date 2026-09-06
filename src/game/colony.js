@@ -678,7 +678,9 @@ export class Colony {
     for (const thread of this.threads.values()) {
       const key = thread.project || 'unknown'
       let row = byProject.get(key)
-      if (!row) row = byProject.set(key, { counts: {}, total: 0, harness: '', title: '', rank: 99 }).get(key)
+      if (!row) {
+        row = byProject.set(key, { counts: {}, total: 0, harness: '', title: '', threadId: null, rank: 99 }).get(key)
+      }
       row.total++
       const status = statusFor(thread, now)
       row.counts[status] = (row.counts[status] || 0) + 1
@@ -689,6 +691,8 @@ export class Colony {
       if (rank >= 0 && rank < row.rank) {
         row.rank = rank
         row.title = thread.title || ''
+        // And its id, because the panel is not just a label: Enter on it opens this thread.
+        row.threadId = thread.id
       }
     }
 
@@ -707,6 +711,7 @@ export class Colony {
         // The worst thing happening in a repo is what the repo's panel is coloured by.
         status: STATUS_ORDER.find((key) => row.counts[key]) || 'idle',
         title: row.title,
+        threadId: row.threadId,
         harness: row.harness,
       })
     }
