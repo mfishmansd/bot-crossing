@@ -657,25 +657,55 @@ export class Colony {
   }
 
   /**
-   * One panel per astronaut, in the order the colony already holds them, so the wall is
-   * stable between scans — a thread that keeps its place is one you can watch, and a wall
-   * that reshuffles on every poll is one you cannot read at all.
+   * One panel per repo, not per thread.
+   *
+   * A thread is the wrong unit for a wall. There are four hundred of them against two
+   * hundred panels, they come and go as sessions open and close, and a panel whose meaning
+   * changes underneath you is one you cannot learn the position of. A repo is stable, there
+   * are fewer of them than there are panels, and it is the thing you actually think in.
+   *
+   * Rolled up live rather than at scan time: a thread changes what it is doing between
+   * polls, and a wall that only moved when the disk did would be a photograph.
    */
   syncDeck() {
     if (!this.aboard) return
-    const entries = []
+    const byProject = new Map()
     for (const agent of this.astronauts.agents) {
       if (agent.state === 'gone' || agent.state === 'leaving') continue
-      const thread = agent.thread
-      entries.push({
-        id: agent.id,
-        project: thread?.project || '',
-        title: thread?.title || '',
-        harness: thread?.harnessName || thread?.harness || '',
-        status: agent.status,
+      const key = agent.thread?.project || 'unknown'
+      let row = byProject.get(key)
+      if (!row) row = byProject.set(key, { counts: {}, total: 0, harness: '', title: '', rank: 99 }).get(key)
+      row.total++
+      row.counts[agent.status] = (row.counts[agent.status] || 0) + 1
+      if (!row.harness) row.harness = agent.thread?.harnessName || agent.thread?.harness || ''
+      // Carry the worst thread's title: it is the one sentence saying why this repo is lit,
+      // and STATUS_ORDER is already written worst first, so its index is the ranking.
+      const rank = STATUS_ORDER.indexOf(agent.status)
+      if (rank >= 0 && rank < row.rank) {
+        row.rank = rank
+        row.title = agent.thread?.title || ''
+      }
+    }
+
+    // Walked in plot order, which is the order the zones were laid out in and the order the
+    // sidebar lists them: busiest first. So a repo is in the same place on the wall every
+    // time you come aboard, and in the same place as everywhere else in the app.
+    const rows = []
+    for (const plot of this.plotOrder) {
+      const row = byProject.get(plot.id)
+      if (!row) continue
+      rows.push({
+        id: plot.id,
+        project: plot.id,
+        total: row.total,
+        counts: row.counts,
+        // The worst thing happening in a repo is what the repo's panel is coloured by.
+        status: STATUS_ORDER.find((key) => row.counts[key]) || 'idle',
+        title: row.title,
+        harness: row.harness,
       })
     }
-    this.deck.sync(entries)
+    this.deck.sync(rows)
   }
 
   /** The plot under a world point. On a hex lattice the nearest cell centre is the cell. */

@@ -36,6 +36,17 @@ const COLS = 40
 const WALK_R = ROOM_R - 2.2
 
 /**
+ * Which row of the wall gets filled first.
+ *
+ * Panels are built from the floor up, and the colony hands its repos over busiest first, so
+ * left alone the wall puts the repo you care most about at knee height and a repo with one
+ * sleeping thread at eye level. The rows sit at 1.01, 1.93, 2.85, 3.77 and 4.69; you stand
+ * with your eye near two. So it is filled from there outwards, and the quiet tail ends up
+ * where a quiet tail belongs — overhead and underfoot.
+ */
+const ROW_FILL = [1, 2, 0, 3, 4]
+
+/**
  * Panel colour by thread status. Deliberately the astronauts' own trim palette rather than
  * a new one: the wall has to be readable by somebody who has spent an hour reading those
  * same colours out on the surface, and a second vocabulary for the same six states is how
@@ -268,6 +279,14 @@ export class CommandDeck {
     }
     this.screens.instanceMatrix.needsUpdate = true
     this.group.add(this.screens)
+
+    // The order repos are dealt round the wall: eye level first, then out. Built once here
+    // rather than sorted per sync, because it depends on nothing that ever changes.
+    this.order = []
+    for (const row of ROW_FILL) {
+      for (let col = 0; col < COLS; col++) this.order.push(row * COLS + col)
+    }
+
     this._drawAll([])
   }
 
@@ -310,8 +329,8 @@ export class CommandDeck {
     const pad = 12
     const width = CELL_W - pad * 2
 
-    // The project, loudest: it is what the zone outside is called, and the thing you are
-    // most likely to be scanning the wall for.
+    // The repo, loudest: it is what the zone outside is called, what the sidebar lists, and
+    // what you are scanning the wall for.
     c.font = 'bold 19px ui-monospace, SFMono-Regular, Menlo, monospace'
     c.fillStyle = 'rgba(255,255,255,0.96)'
     c.fillText(ellipsize(c, entry.project || '—', width), pad, 25)
@@ -323,14 +342,33 @@ export class CommandDeck {
     c.lineTo(CELL_W - pad, 34.5)
     c.stroke()
 
+    // The count, then only the states worth naming. A repo where nothing is wrong says so
+    // by listing nothing — a breakdown that always prints six numbers, four of them zero,
+    // is one nobody reads.
+    const counts = entry.counts || {}
+    const notable = []
+    if (counts.blocked) notable.push(counts.blocked + ' stuck')
+    if (counts.waiting) notable.push(counts.waiting + ' need you')
+    if (counts.working) notable.push(counts.working + ' running')
     c.font = '15px ui-monospace, SFMono-Regular, Menlo, monospace'
-    c.fillStyle = 'rgba(255,255,255,0.72)'
-    const lines = wrap(c, entry.title, width, 3)
-    for (let k = 0; k < lines.length; k++) c.fillText(lines[k], pad, 54 + k * 18)
+    c.fillStyle = 'rgba(255,255,255,0.82)'
+    const total = entry.total === 1 ? '1 thread' : entry.total + ' threads'
+    c.fillText(ellipsize(c, total, width), pad, 54)
+    if (notable.length) {
+      c.fillStyle = 'rgba(255,255,255,0.66)'
+      c.fillText(ellipsize(c, notable.join(' · '), width), pad, 72)
+    }
 
-    // The status word, and the harness it belongs to. Bottom of the panel, quietest. The
-    // two share the line, so the split between them is what decides whether "Claude Code"
-    // survives or becomes "Claude …" — it is measured rather than guessed.
+    // And the worst thread's own words, if there is room left for them — one line, because
+    // this is the reason the repo is lit rather than the whole of what it is doing.
+    if (entry.title) {
+      c.font = '13px ui-monospace, SFMono-Regular, Menlo, monospace'
+      c.fillStyle = 'rgba(255,255,255,0.44)'
+      c.fillText(ellipsize(c, entry.title, width), pad, notable.length ? 90 : 76)
+    }
+
+    // The status word, and the harness. The split between them is measured rather than
+    // guessed, or a long harness name loses its tail to make room for nothing.
     c.font = 'bold 14px ui-monospace, SFMono-Regular, Menlo, monospace'
     c.fillStyle = 'rgba(255,255,255,0.9)'
     const status = (entry.status || '').toUpperCase()
@@ -381,22 +419,28 @@ export class CommandDeck {
   }
 
   /**
-   * Point the wall at the colony. Threads are dealt round the panels in order, and a colony
-   * with fewer threads than panels leaves the rest dark rather than repeating itself — a
-   * wall looping the same six threads twenty times looks busy and says nothing.
+   * Point the wall at the colony, one panel per repo. Dealt round in order, and a colony
+   * with fewer repos than panels leaves the rest dark rather than repeating itself — a wall
+   * looping the same six repos twenty times looks busy and says nothing.
    */
   sync(entries) {
     const panels = this.panels
+    // Entries arrive in the colony's order and panels are in the wall's; `order` is the map
+    // between them, so everything below indexes by panel and never by rank.
+    const byPanel = new Array(panels.length).fill(null)
+    for (let k = 0; k < entries.length && k < this.order.length; k++) byPanel[this.order[k]] = entries[k]
     // Redrawing two hundred cells of text is cheap next to a poll and ruinous next to a
     // frame, so it happens only when the wall is actually showing something else. Colour
     // still follows every sync: a thread changing what it is doing is a tint, not a redraw.
-    const signature = entries.map((e) => (e ? e.id + '\u0000' + e.title : '')).join('\u0001')
+    const signature = byPanel
+      .map((e) => (e ? [e.id, e.total, e.counts.blocked, e.counts.waiting, e.counts.working, e.title].join('\u0000') : ''))
+      .join('\u0001')
     if (signature !== this._signature) {
       this._signature = signature
-      this._drawAll(entries)
+      this._drawAll(byPanel)
     }
     for (let i = 0; i < panels.length; i++) {
-      const status = entries[i] && entries[i].status
+      const status = byPanel[i] && byPanel[i].status
       panels[i].base = (status && STATUS_COLOR[status]) || DARK
       // A panel just handed a thread flares, so the wall visibly reacts to a scan landing
       // instead of quietly becoming a different wall.
