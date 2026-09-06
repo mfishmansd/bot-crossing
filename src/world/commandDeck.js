@@ -53,14 +53,21 @@ const ROW_FILL = [1, 2, 0, 3, 4]
  * you build a dashboard nobody can parse at a glance.
  */
 const STATUS_COLOR = {
-  working: [0.31, 0.6, 0.39],
-  waiting: [0.31, 0.49, 0.79],
-  blocked: [0.79, 0.31, 0.31],
-  celebrating: [0.79, 0.63, 0.31],
-  idle: [0.3, 0.31, 0.33],
-  sleeping: [0.22, 0.22, 0.3],
+  working: [0.34, 0.72, 0.45],
+  waiting: [0.34, 0.55, 0.92],
+  blocked: [0.92, 0.34, 0.34],
+  celebrating: [0.92, 0.72, 0.34],
+  // Quiet, not off. Two thirds of a real projects directory is asleep at any moment, and
+  // the first pass had these down at 0.22 — which against a black room is indistinguishable
+  // from a panel with nothing behind it, so a wall of a hundred and seventy repos read as
+  // the dozen that happened to be busy. A sleeping repo is still a repo you own; it should
+  // be legible and obviously not urgent, which is a job for contrast rather than for
+  // switching it off.
+  idle: [0.55, 0.57, 0.6],
+  sleeping: [0.44, 0.46, 0.56],
 }
-const DARK = [0.06, 0.065, 0.085]
+/** No repo behind it at all. The one thing on the wall that really is switched off. */
+const DARK = [0.05, 0.055, 0.075]
 
 /**
 /**
@@ -454,7 +461,9 @@ export class CommandDeck {
     const c = this._c
     for (let i = 0; i < panels.length; i++) {
       const p = panels[i]
-      const flicker = 0.72 + 0.28 * Math.sin(elapsed * 1.7 + p.phase * Math.PI * 2)
+      // Shallower than it was, for the same reason the quiet colours came up: a panel that
+      // dips to seven tenths is a panel that spends half its time unreadable.
+      const flicker = 0.86 + 0.14 * Math.sin(elapsed * 1.7 + p.phase * Math.PI * 2)
       p.gain = p.gain > 1 ? Math.max(1, p.gain - dt * 1.6) : 1
       const k = flicker * p.gain
       c.setRGB(p.base[0] * k, p.base[1] * k, p.base[2] * k)
