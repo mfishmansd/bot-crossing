@@ -52,6 +52,21 @@ somebody writing that adapter.
 Every harness that is installed shows up at once — the colony is the union of all of them, and
 an astronaut carries the name of the harness it belongs to.
 
+### And your projects directory
+
+One adapter in `server/harnesses/` has no harness behind it at all. It reads the repositories
+themselves and hands each one back shaped like a thread, so a folder you have not opened an
+agent in still gets ground in the colony — one thread per local branch, the folder's name
+claiming the zone, the branch tip's commit date standing in for last activity, and the tracked
+bytes at that tip deciding how finished the building looks.
+
+The field that earns it its keep is `unread`. In Claude Code that is a thread that stopped and
+wants you; here it is **uncommitted changes, or commits you never pushed** — the same question
+asked of a folder instead of a session. A projects directory is mostly work you are *not* doing
+this afternoon, and a map that draws only the live threads draws the smallest part of it.
+
+It never writes anything at all — not even the archive flag the Claude Code adapter sets.
+
 ### Adding one
 
 One new file in `server/harnesses/`, one line in its `index.mjs`, and nothing else. The
