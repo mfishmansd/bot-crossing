@@ -479,6 +479,16 @@ function syncProject() {
  * walk the same way depending on where you happened to have dragged the view.
  */
 const WALK_KEYS = new Set(['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', ' '])
+/**
+ * How close to the foot of the ramp counts as standing at the hatch.
+ *
+ * You board by pressing a key here rather than by walking up the ramp, because an
+ * astronaut's height comes from the terrain sampler and the ramp is not terrain — climbing
+ * it is a physics problem of its own, and not the one this feature is.
+ */
+const HATCH_RANGE = 3.2
+/** Whether the prompt is currently showing, so it is written once rather than every frame. */
+let atHatch = false
 
 function nearestAgent() {
   let best = null
@@ -512,6 +522,10 @@ function startWalk(agent) {
 
 function stopWalk() {
   if (!walkingId) return
+  // Letting go while aboard would strand the astronaut on a deck six hundred units under
+  // the colony, walking its errands underground for the rest of the session.
+  if (colony.aboard) colony.leaveShip()
+  atHatch = false
   walkingId = null
   held.clear()
   colony.astronauts.release()
@@ -524,11 +538,59 @@ function stopWalk() {
 // scan — and when it is, the page has to put the camera back rather than follow a ghost.
 colony.astronauts.onReleased = () => {
   if (!walkingId) return
+  if (colony.aboard) colony.leaveShip()
+  atHatch = false
   walkingId = null
   rig.setWalking(false)
   engine.setFocusScale(1)
   hud.setWalking(null)
   hud.toast('That thread has finished — you are back on the map')
+}
+
+/**
+ * Offer the hatch when you are stood at it, and take the offer back when you walk away.
+ * Written only on the edges: a hint rewritten sixty times a second is a hint that cannot be
+ * replaced by anything else the colony wants to say to you.
+ */
+function updateHatchPrompt() {
+  if (!walkingId || colony.aboard) {
+    atHatch = false
+    return
+  }
+  const agent = colony.astronauts.driven
+  if (!agent) return
+  const door = colony.ship.shipDoor(_hatch)
+  const near = Math.hypot(agent.pos.x - door.x, agent.pos.z - door.z) < HATCH_RANGE
+  if (near === atHatch) return
+  atHatch = near
+  hud.hint(near ? 'E to go aboard' : 'WASD or arrows to walk · shift to run · space to hop · Esc to let go')
+}
+const _hatch = new THREE.Vector3()
+
+/** Aboard, or back out. The camera is snapped rather than flown; the deck is a long way down. */
+function toggleAboard() {
+  if (!walkingId) return
+  if (colony.aboard) {
+    const agent = colony.leaveShip()
+    if (agent) {
+      rig.snapTo(agent.pos)
+      engine.setFocusScale(0.3)
+      hud.hint('Back on the surface · E at the ramp to go aboard again')
+    }
+    return
+  }
+  const agent = colony.astronauts.driven
+  if (!agent) return
+  const door = colony.ship.shipDoor(_hatch)
+  if (Math.hypot(agent.pos.x - door.x, agent.pos.z - door.z) > HATCH_RANGE) return
+  const aboard = colony.boardShip()
+  if (!aboard) return
+  rig.snapTo(aboard.pos)
+  // The deck is a room, not a landscape: the shallow focus that makes the colony read as a
+  // model on a table has nothing to do here but blur the far wall.
+  engine.setFocusScale(1)
+  atHatch = false
+  hud.hint('The command deck · every panel is a thread · E to step back outside')
 }
 
 /** Held keys → a direction in the camera's frame, written straight onto the agent. */
@@ -661,6 +723,12 @@ window.addEventListener('keydown', (e) => {
   // Walking, the movement keys are the movement keys. `S` is the settings panel on the map
   // and "back" on the deck, and there is no reading of that which lets both have it.
   const key = e.key.toLowerCase()
+  if (walkingId && key === 'e') {
+    e.preventDefault()
+    toggleAboard()
+    return
+  }
+
   if (walkingId && WALK_KEYS.has(key)) {
     e.preventDefault()
     if (key === ' ') colony.astronauts.hop(walkingId)
@@ -891,6 +959,7 @@ settings.onChange((changed, scope) => {
 engine.add({
   update(dt, elapsed) {
     if (walkingId) driveInput()
+    updateHatchPrompt()
     rig.update(dt)
     colony.update(dt, elapsed, rig.target)
     // Whatever the camera is orbiting is what should be in focus.

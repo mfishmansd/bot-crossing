@@ -558,6 +558,13 @@ export class Astronauts {
       trim: new THREE.Color(0xffffff),
       /** Backpack colour. Follows `trim` for everybody but the astronaut you are driving. */
       pack: new THREE.Color(0xffffff),
+      /**
+       * A floor of its own, and a circle it may walk in. Both null for everybody on the
+       * surface, where the planet decides the height and the nav grid decides the walls.
+       * Set only for the astronaut you have taken aboard the ship.
+       */
+      floorY: null,
+      bounds: null,
       hop: 0,
       /** Vertical speed, only ever non-zero while somebody is hopping this one about. */
       hopVel: 0,
@@ -831,7 +838,14 @@ export class Astronauts {
     // half the colony. Sampled only when the agent has actually moved — most of the crew is
     // parked at its site, and the sample is a hex lookup plus a noise evaluation.
     const ground = this.world?.groundAt
-    if (ground) {
+    if (agent.floorY !== null) {
+      // Aboard the ship the floor is a deck plate at a fixed height, not the planet. The
+      // terrain field is defined everywhere, so sampling it six hundred units under the
+      // world does not fail — it quietly returns a hillside and drops you through the deck.
+      agent.groundAt = agent.floorY
+      agent.groundY =
+        agent.groundY === null ? agent.floorY : THREE.MathUtils.damp(agent.groundY, agent.floorY, 14, dt)
+    } else if (ground) {
       if (agent.groundAt === null || Math.abs(agent.pos.x - agent.groundX) + Math.abs(agent.pos.z - agent.groundZ) > 0.2) {
         agent.groundX = agent.pos.x
         agent.groundZ = agent.pos.z
@@ -917,7 +931,20 @@ export class Astronauts {
 
     const dx = agent.vel.x * dt
     const dz = agent.vel.z * dt
-    if (this.nav) {
+    if (agent.bounds) {
+      // Aboard, the room is round and its wall is the edge of the world. A circle is the
+      // whole of the collision that needs — one hypot per frame, rather than rasterising a
+      // room into a grid sized for a colony a hundred times wider than it.
+      agent.pos.x += dx
+      agent.pos.z += dz
+      const bx = agent.pos.x - agent.bounds.x
+      const bz = agent.pos.z - agent.bounds.z
+      const d = Math.hypot(bx, bz)
+      if (d > agent.bounds.r) {
+        agent.pos.x = agent.bounds.x + (bx / d) * agent.bounds.r
+        agent.pos.z = agent.bounds.z + (bz / d) * agent.bounds.r
+      }
+    } else if (this.nav) {
       // `solidOnly`: buildings and the ship stop you, ground clutter and scatter do not.
       if (!this.nav.slide(agent.pos, dx, dz, false, true)) agent.vel.multiplyScalar(0.35)
     } else {
@@ -972,6 +999,12 @@ export class Astronauts {
     agent.input = null
     agent.hop = 0
     agent.hopVel = 0
+    // Whatever else letting go means, it means back on the planet: an astronaut released
+    // while aboard would otherwise keep the deck's floor and walk its errands underground.
+    agent.floorY = null
+    agent.bounds = null
+    agent.groundAt = null
+    agent.groundY = null
     // Its own suit back, and its own status colours with it.
     if (agent.wasSuit !== undefined) agent.suit = agent.wasSuit
     agent.wasSuit = undefined
@@ -993,6 +1026,44 @@ export class Astronauts {
     agent.pack.set(DRIVE_LOOK.pack)
     agent.eye.setRGB(...DRIVE_LOOK.eye)
     agent.colorDirty = true
+  }
+
+  /**
+   * Take the astronaut you are steering somewhere with a floor of its own. Its position is
+   * set outright rather than walked to: the deck is six hundred units down, and easing into
+   * that is a fall rather than a step.
+   */
+  boardInterior(pos, floorY, bounds) {
+    const agent = this.driven
+    if (!agent) return null
+    agent.pos.set(pos.x, floorY, pos.z)
+    agent.floorY = floorY
+    agent.groundAt = floorY
+    agent.groundY = floorY
+    agent.bounds = bounds
+    agent.vel.set(0, 0, 0)
+    agent.hop = 0
+    agent.hopVel = 0
+    return agent
+  }
+
+  /**
+   * Back out onto the surface. The ground trackers are cleared rather than set, so the next
+   * frame snaps to whatever the terrain actually is there instead of easing down from a
+   * height six hundred units wrong.
+   */
+  leaveInterior(pos) {
+    const agent = this.driven
+    if (!agent) return null
+    agent.floorY = null
+    agent.bounds = null
+    agent.groundAt = null
+    agent.groundY = null
+    agent.pos.set(pos.x, pos.y, pos.z)
+    agent.vel.set(0, 0, 0)
+    agent.hop = 0
+    agent.hopVel = 0
+    return agent
   }
 
   /** A hop, if this one is under a hand and has its feet on the ground. */

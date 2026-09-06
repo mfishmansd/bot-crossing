@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { PLANETS, createTerrain, createScatter, terrainHeight, setColonyFlatRadius } from '../world/planet.js'
+import { CommandDeck } from '../world/commandDeck.js'
 import { Sky } from '../world/sky.js'
 import {
   Plot,
@@ -184,6 +185,10 @@ export class Colony {
     scene.add(this.worldGroup)
 
     this.ship = new Ship(scene, shipPosition())
+    // The room behind the hatch. Built once and left dark; see `commandDeck.js` for why it
+    // is not inside the ship it belongs to.
+    this.deck = new CommandDeck(scene)
+    this.aboard = false
     this.astronauts = new Astronauts(scene, settings)
     this.astronauts.world = this._world()
     this.indicators = new Indicators(scene, settings, Math.max(64, settings.get('maxAgents')))
@@ -628,6 +633,44 @@ export class Colony {
     this.nav.rebuild(obstacles)
   }
 
+  /**
+   * Go aboard. The wall is pointed at the colony on the way in rather than every frame:
+   * what a panel shows only changes when a scan lands, and a scan is not a frame.
+   */
+  boardShip() {
+    if (this.aboard) return null
+    const agent = this.astronauts.boardInterior(this.deck.entry(), this.deck.floorY, this.deck.bounds())
+    if (!agent) return null
+    this.aboard = true
+    this.deck.setAboard(true)
+    this.syncDeck()
+    return agent
+  }
+
+  /** Back out at the foot of the ramp, which is where astronauts always come and go. */
+  leaveShip() {
+    if (!this.aboard) return null
+    this.aboard = false
+    this.deck.setAboard(false)
+    const door = this.ship.shipDoor()
+    return this.astronauts.leaveInterior(door)
+  }
+
+  /**
+   * One panel per astronaut, in the order the colony already holds them, so the wall is
+   * stable between scans — a thread that keeps its place is one you can watch, and a wall
+   * that reshuffles on every poll is one you cannot read at all.
+   */
+  syncDeck() {
+    if (!this.aboard) return
+    const statuses = []
+    for (const agent of this.astronauts.agents) {
+      if (agent.state === 'gone' || agent.state === 'leaving') continue
+      statuses.push(agent.status)
+    }
+    this.deck.sync(statuses)
+  }
+
   /** The plot under a world point. On a hex lattice the nearest cell centre is the cell. */
   plotAt(x, z) {
     let best = null
@@ -883,6 +926,17 @@ export class Colony {
     // One write turns every rotor in the colony.
     buildingUniforms.uTime.value = elapsed
     this.ship.update(dt, elapsed, night)
+    this.deck.update(dt, elapsed)
+    // Re-dealt a few times a second rather than every frame. A thread changes what it is
+    // doing on the timescale of a poll, and rebuilding the wall at sixty hertz would be two
+    // hundred writes a frame to say the same thing it said on the last one.
+    if (this.aboard) {
+      this._deckAge = (this._deckAge || 0) + dt
+      if (this._deckAge > 0.75) {
+        this._deckAge = 0
+        this.syncDeck()
+      }
+    }
 
     this._growBuildings(dt)
     this.astronauts.update(dt, elapsed)

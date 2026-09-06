@@ -308,6 +308,18 @@ export class CameraRig {
   }
 
   /**
+   * Put the camera where it is going this frame instead of flying it there. The trailing
+   * damp in `follow` is what makes this read as a camera following somebody, and it is
+   * exactly wrong when the astronaut does not walk to its next position but appears at it:
+   * going aboard the ship moves you six hundred units, and damping across that is several
+   * seconds of falling through the floor of the world with the camera strung out behind.
+   */
+  snapTo(point) {
+    this.desiredTarget.set(point.x, point.y, point.z)
+    this.target.set(point.x, point.y, point.z)
+  }
+
+  /**
    * Enter or leave walk mode. The map's framing is put away on the way in and handed back
    * on the way out — coming back to a colony you had lined up and finding it at a stranger's
    * zoom is the sort of thing that makes a mode feel like a trapdoor.
