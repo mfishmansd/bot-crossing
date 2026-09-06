@@ -885,7 +885,7 @@ export class Astronauts {
   /**
    * One step of the astronaut you are steering.
    *
-   * Deliberately not `_walk`. Three things are different, and all three are the difference
+   * Deliberately not `_walk`. Four things are different, and all four are the difference
    * between a character and a simulated one:
    *
    * - **No separation.** The crew is pushed apart by its neighbours, which is right for
@@ -893,6 +893,11 @@ export class Astronauts {
    *   off the direction you are holding, and a control that argues with you is broken.
    *   Everybody else still separates *from* you, so you can walk into a group and part it.
    * - **No pathfinding.** You are the pathfinder.
+   * - **Looser collision.** The crew's obstacles are inflated for agents that have to route
+   *   past each other in traffic without appearing to scrape the walls. Applied to you that
+   *   generosity becomes a wall you can see through and cannot cross, which is the same
+   *   broken argument as the separation above, so you walk on the grid's second map: only
+   *   what you genuinely cannot pass, at a radius that lets you take the gap.
    * - **Off the edge of the grid is walkable.** The crew is kept inside the colony by the
    *   grid's own bounds; you should be able to walk out onto the empty ground and look back
    *   at the place, and there is nothing out there to collide with anyway.
