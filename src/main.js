@@ -525,7 +525,7 @@ function startWalk(agent) {
   rig.follow(agent.pos)
   select(agent.id, {})
   hud.setWalking(agent.thread?.title || agent.id)
-  hud.hint('WASD or arrows to walk · shift to run · space to hop · Esc to let go')
+  hud.hint('WASD or arrows to walk · shift to run · space to hop, hold it to fly · Esc to let go')
 }
 
 function stopWalk() {
@@ -577,7 +577,7 @@ function updateHatchPrompt() {
   const near = Math.hypot(agent.pos.x - door.x, agent.pos.z - door.z) < HATCH_RANGE
   if (near === atHatch) return
   atHatch = near
-  hud.hint(near ? 'E to go aboard' : 'WASD or arrows to walk · shift to run · space to hop · Esc to let go')
+  hud.hint(near ? 'E to go aboard' : 'WASD or arrows to walk · shift to run · space to hop, hold it to fly · Esc to let go')
 }
 const _hatch = new THREE.Vector3()
 
@@ -674,6 +674,7 @@ function driveInput() {
   agent.input.x = -Math.sin(az) * forward + Math.cos(az) * strafe
   agent.input.z = -Math.cos(az) * forward - Math.sin(az) * strafe
   agent.input.run = held.has('shift')
+  agent.input.thrust = held.has(' ')
 
   // Aimed at the chest rather than the boots, so the astronaut sits in the middle of the
   // frame with the colony around it instead of at the bottom edge looking at the floor.
@@ -821,8 +822,9 @@ window.addEventListener('keydown', (e) => {
 
   if (walkingId && WALK_KEYS.has(key)) {
     e.preventDefault()
+    // Space taps a hop and, held, keeps the jetpack lit — so it is held like the rest.
     if (key === ' ') colony.astronauts.hop(walkingId)
-    else held.add(key)
+    held.add(key)
     return
   }
 

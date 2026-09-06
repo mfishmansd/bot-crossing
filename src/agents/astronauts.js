@@ -126,6 +126,18 @@ const HOP_AIRTIME = (2 * HOP_SPEED) / GRAVITY
  * halfway across it.
  */
 const DRIVE_AIR_ACCEL = 4
+/**
+ * The jetpack. A tap of space is a hop; holding it keeps you climbing. Net lift is THRUST
+ * minus GRAVITY, so the climb builds rather than snapping, and the cap is what keeps a long
+ * hold from turning into a launch. Above FLY_CLEAR you are over every roof in the colony
+ * and the nav grid stops applying — you cannot walk through a habitat, but you can very
+ * much fly over one. The ceiling is only there so that a forgotten key does not put you
+ * where the fog is all there is.
+ */
+const THRUST = 13
+const CLIMB_MAX = 5.5
+const FLY_CLEAR = 4.2
+const FLY_CEILING = 60
 
 /**
  * The mannequin is authored 2.2 units tall. The colony wants a "little guy" silhouette at
@@ -919,13 +931,19 @@ export class Astronauts {
   _drive(agent, dt) {
     const input = agent.input || { x: 0, z: 0, run: false }
     const len = Math.hypot(input.x, input.z)
-    const want = len > 0.001 ? DRIVE_SPEED * (input.run ? DRIVE_RUN : 1) : 0
+    const airborne = agent.hopVel !== 0 || agent.hop > 0
+    // No jetpack aboard the ship. The deck has a ceiling a body-length over your head, and
+    // a jetpack in a room that size is a way of hitting it.
+    const thrusting = Boolean(input.thrust) && airborne && !agent.bounds
+    agent.thrusting = thrusting
+    // Flying is fast, and it is steerable — a jetpack you cannot point is a rocket.
+    const want = len > 0.001 ? DRIVE_SPEED * (input.run || thrusting ? DRIVE_RUN : 1) : 0
 
     // Feet on the ground, the keys win instantly. Off it, they barely argue: horizontal
     // speed is mostly whatever you left the ground with, which is what turns a running hop
-    // into a long low leap instead of a mid-air walk.
-    const airborne = agent.hopVel !== 0 || agent.hop > 0
-    const accel = airborne ? DRIVE_AIR_ACCEL : DRIVE_ACCEL
+    // into a long low leap instead of a mid-air walk. Unless the jetpack is lit, in which
+    // case the keys win again: the drift is the hop's character, not the flight's.
+    const accel = airborne && !thrusting ? DRIVE_AIR_ACCEL : DRIVE_ACCEL
     agent.vel.x = THREE.MathUtils.damp(agent.vel.x, len > 0.001 ? (input.x / len) * want : 0, accel, dt)
     agent.vel.z = THREE.MathUtils.damp(agent.vel.z, len > 0.001 ? (input.z / len) * want : 0, accel, dt)
 
@@ -944,8 +962,10 @@ export class Astronauts {
         agent.pos.x = agent.bounds.x + (bx / d) * agent.bounds.r
         agent.pos.z = agent.bounds.z + (bz / d) * agent.bounds.r
       }
-    } else if (this.nav) {
+    } else if (this.nav && agent.hop <= FLY_CLEAR) {
       // `solidOnly`: buildings and the ship stop you, ground clutter and scatter do not.
+      // And past FLY_CLEAR neither does the grid: it is a map of what is on the ground,
+      // and you are not.
       if (!this.nav.slide(agent.pos, dx, dz, false, true)) agent.vel.multiplyScalar(0.35)
     } else {
       agent.pos.x += dx
@@ -957,7 +977,12 @@ export class Astronauts {
     // which is what lets you hop up onto a deck.
     if (airborne) {
       agent.hopVel -= GRAVITY * dt
+      if (thrusting) agent.hopVel = Math.min(agent.hopVel + THRUST * dt, CLIMB_MAX)
       agent.hop += agent.hopVel * dt
+      if (agent.hop > FLY_CEILING) {
+        agent.hop = FLY_CEILING
+        agent.hopVel = Math.min(agent.hopVel, 0)
+      }
       if (agent.hop <= 0) {
         agent.hop = 0
         agent.hopVel = 0
@@ -997,6 +1022,7 @@ export class Astronauts {
     if (!agent) return null
     agent.driven = false
     agent.input = null
+    agent.thrusting = false
     agent.hop = 0
     agent.hopVel = 0
     // Whatever else letting go means, it means back on the planet: an astronaut released
@@ -1370,6 +1396,12 @@ export class Astronauts {
           ? THREE.MathUtils.clamp(clip.duration / HOP_AIRTIME, 0.3, 1)
           : 1
     agent.clipTime += dt * anim * rate
+    // The jump clip ends in a landing. Flying, there is no landing coming, so the clip is
+    // held at its highest point — an astronaut hanging under a jetpack rather than one who
+    // has been touching down for the last fifteen seconds.
+    if (key === 'jump' && (agent.thrusting || agent.hop > FLY_CLEAR)) {
+      agent.clipTime = Math.min(agent.clipTime, clip.duration * 0.42)
+    }
 
     if (key === 'sitDown' && agent.clipTime >= clip.duration) {
       agent.clipKey = 'sit'

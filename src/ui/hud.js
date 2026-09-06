@@ -1037,7 +1037,7 @@ const TEMPLATE = `
   <span class="keys">
     <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk
     <kbd>⇧</kbd> run
-    <kbd>space</kbd> hop
+    <kbd>space</kbd> hop · hold to fly
     <kbd>drag</kbd> look
   </span>
   <button class="btn" id="btn-walk-stop">Let go <kbd>Esc</kbd></button>
