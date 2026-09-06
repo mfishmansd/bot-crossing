@@ -17,7 +17,9 @@ import {
   archiveThread,
   newSession,
   revealFolder,
+  fetchReadme,
 } from './game/api.js'
+import { renderMarkdown, readmeSummary } from './ui/markdown.js'
 
 /**
  * Boot and the outer game loop.
@@ -57,6 +59,14 @@ let selectedId = null
 /** Which zone's sidebar is open. A repo, not a thread — they outlive the threads on them. */
 let selectedProject = null
 let hoverId = null
+/** Which astronaut you are steering, if any. See `startWalk`. */
+let walkingId = null
+/** Movement keys currently down. A Set rather than flags so a key repeat cannot double up. */
+const held = new Set()
+/** Every README summary read this session, by folder. See `readmeFor`. */
+const readmes = new Map()
+/** The rendered body of the *open* repo's readme, and only that one. See `readmePanel`. */
+let panelReadme = null
 let statusCursor = 0
 let pendingSave = 0
 const hoverGround = new THREE.Vector3()
@@ -76,6 +86,26 @@ const actions = {
     a.download = `bot-crossing-${colony.planet.id}-${stamp()}.png`
     a.click()
     hud.toast('Screenshot saved')
+  },
+
+  /**
+   * Take one astronaut off its errands and walk it about yourself.
+   *
+   * Whoever is selected, or failing that whoever is nearest the middle of the view — asking
+   * you to pick somebody first would make the mode two steps, and the whole appeal of it is
+   * that it is one.
+   */
+  toggleWalk: () => {
+    if (walkingId) {
+      stopWalk()
+      return
+    }
+    const agent = colony.agentFor(selectedId) || nearestAgent()
+    if (!agent) {
+      hud.toast('Nobody is out on the surface to walk', 'err')
+      return
+    }
+    startWalk(agent)
   },
 
   /** Google Earth's auto-rotate: a slow sweep around whatever is centred. */
@@ -225,6 +255,14 @@ const actions = {
   },
 }
 
+// A zone close enough to carry a sign wants the readme behind it. Asked for from here
+// rather than fetched by the colony, which knows about distances and nothing about servers.
+colony.onReadmeWanted = (name) => {
+  const path = pathForProject(name)
+  if (path) readmeFor(path, name)
+  else colony.setReadme(name, null)
+}
+
 const hud = new Hud(app, settings, actions)
 // The sidebar is permanent, so the card beside an astronaut has a wall to stay clear of.
 const sideWidth = () => (window.innerWidth <= 820 ? 0 : 334)
@@ -316,6 +354,75 @@ function pathForProject(name) {
   return best
 }
 
+/**
+ * A repo's README, in the two sizes the colony reads it at.
+ *
+ * `readmeFor` is the cheap one: a title and an opening line, for the sign on the plot and
+ * for the sentence the astronaut says. It is kept for every folder that has ever been near
+ * the camera, which is a few hundred bytes each and no markup at all.
+ *
+ * `readmePanel` is the expensive one — the whole document, rendered — and exactly one is
+ * held at a time, for whichever repo's sidebar is open. Rendering every README a session
+ * touches and keeping them all would be tens of megabytes of DOM strings to show one.
+ *
+ * Both are fire-and-forget: they hand back what is known *now*, usually "reading…" on the
+ * first call, and repaint when the answer lands.
+ */
+const README_TTL = 5 * 60 * 1000
+
+function readmeFor(folder, name) {
+  if (!folder) return null
+
+  const held = readmes.get(folder)
+  // Marked as in-flight *before* the request goes out, so the sign sweep asking again half
+  // a second later does not start a second read of the same file.
+  if (held && Date.now() - held.at < README_TTL) return held
+  const entry = held || { state: 'loading', summary: null }
+  entry.at = Date.now()
+  readmes.set(folder, entry)
+
+  fetchReadme(folder)
+    .then((res) => {
+      const summary = res.found ? readmeSummary(res.text, name) : null
+      readmes.set(folder, { state: res.found ? 'ready' : 'none', summary, at: Date.now() })
+      colony.setReadme(name, summary)
+    })
+    .catch(() => {
+      // Told as "no readme" rather than left unanswered: an unanswered zone is one the
+      // sweep asks about again on every pass, for as long as you stand near it.
+      readmes.set(folder, { state: 'error', summary: null, at: Date.now() })
+      colony.setReadme(name, null)
+    })
+
+  return entry
+}
+
+function readmePanel(folder) {
+  if (!folder) return { state: 'none', key: '' }
+  if (panelReadme?.folder === folder) return panelReadme
+
+  panelReadme = { folder, state: 'loading', key: '' }
+  fetchReadme(folder)
+    .then((res) => {
+      // The panel may have moved on to another repo while this was in the air.
+      if (panelReadme?.folder !== folder) return
+      panelReadme = {
+        folder,
+        state: res.found ? 'ready' : 'none',
+        key: `${res.file || ''}:${res.modifiedAt || 0}`,
+        html: res.found ? renderMarkdown(res.text) : '',
+      }
+      syncProject()
+    })
+    .catch((err) => {
+      if (panelReadme?.folder !== folder) return
+      panelReadme = { folder, state: 'error', key: 'err', error: err.message }
+      syncProject()
+    })
+
+  return panelReadme
+}
+
 /** Push the open zone's current contents at the sidebar. Closes it if the zone is gone. */
 function syncProject() {
   const plot = selectedProject ? colony.plots.get(selectedProject) : null
@@ -342,17 +449,113 @@ function syncProject() {
       return rank || (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0)
     })
 
+  const path = pathForProject(plot.name)
   hud.setProject({
     name: plot.name,
     accent: plot.accent,
-    path: pathForProject(plot.name),
+    path,
     threads: list,
     selectedId,
+    readme: { ...readmePanel(path), summary: readmes.get(path)?.summary || null },
   })
   // The legend is the same selection seen from the bottom of the screen: keep it in step
   // here rather than only on the next poll.
   hud.setLegend(legendProjects, selectedProject)
 }
+
+// ── walking one of them yourself ──────────────────────────────────────────────────────
+
+/**
+ * Walk mode: the colony from the deck rather than from orbit.
+ *
+ * Almost none of it is new machinery. The astronaut is one of the crew with its own state
+ * machine suspended (`astronauts.drive`), collision is the same nav grid every other
+ * astronaut is already sliding against, and the camera is the same rig with its target
+ * pinned to a moving point instead of a still one. What is genuinely new is only this: a set
+ * of held keys, turned into a direction in the camera's frame.
+ *
+ * Movement is camera-relative — W is *away from the camera*, not north — because the camera
+ * can be spun to any heading and a fixed compass would have you pressing different keys to
+ * walk the same way depending on where you happened to have dragged the view.
+ */
+const WALK_KEYS = new Set(['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift', ' '])
+
+function nearestAgent() {
+  let best = null
+  let bestD = Infinity
+  for (const agent of colony.astronauts.agents) {
+    if (agent.scale < 0.5 || agent.state === 'leaving' || agent.state === 'gone') continue
+    const d = (agent.pos.x - rig.target.x) ** 2 + (agent.pos.z - rig.target.z) ** 2
+    if (d < bestD) {
+      bestD = d
+      best = agent
+    }
+  }
+  return best
+}
+
+function startWalk(agent) {
+  if (!colony.astronauts.drive(agent.id)) return
+  walkingId = agent.id
+  held.clear()
+  rig.setWalking(true)
+  // The shallow focus is what makes the colony a model on a table; from inside it, it is
+  // just fog a few metres out.
+  engine.setFocusScale(0.3)
+  // Not snapped: the camera flies down out of the map, which is both nicer to watch and the
+  // clearest possible statement of which of the four hundred little figures is now you.
+  rig.follow(agent.pos)
+  select(agent.id, {})
+  hud.setWalking(agent.thread?.title || agent.id)
+  hud.hint('WASD or arrows to walk · shift to run · space to hop · Esc to let go')
+}
+
+function stopWalk() {
+  if (!walkingId) return
+  walkingId = null
+  held.clear()
+  colony.astronauts.release()
+  rig.setWalking(false)
+  engine.setFocusScale(1)
+  hud.setWalking(null)
+}
+
+// The astronaut can be taken back out of your hands — its thread archived, or gone from a
+// scan — and when it is, the page has to put the camera back rather than follow a ghost.
+colony.astronauts.onReleased = () => {
+  if (!walkingId) return
+  walkingId = null
+  rig.setWalking(false)
+  engine.setFocusScale(1)
+  hud.setWalking(null)
+  hud.toast('That thread has finished — you are back on the map')
+}
+
+/** Held keys → a direction in the camera's frame, written straight onto the agent. */
+function driveInput() {
+  const agent = colony.astronauts.driven
+  if (!agent) {
+    if (walkingId) stopWalk()
+    return
+  }
+
+  const forward = (held.has('w') || held.has('arrowup') ? 1 : 0) - (held.has('s') || held.has('arrowdown') ? 1 : 0)
+  const strafe = (held.has('d') || held.has('arrowright') ? 1 : 0) - (held.has('a') || held.has('arrowleft') ? 1 : 0)
+
+  // The camera sits at `azimuth` from its target, so away-from-camera is the negation of
+  // that heading, and screen-right is it turned a quarter turn.
+  const az = rig.azimuth
+  agent.input.x = -Math.sin(az) * forward + Math.cos(az) * strafe
+  agent.input.z = -Math.cos(az) * forward - Math.sin(az) * strafe
+  agent.input.run = held.has('shift')
+
+  // Aimed at the chest rather than the boots, so the astronaut sits in the middle of the
+  // frame with the colony around it instead of at the bottom edge looking at the floor.
+  walkAim.set(agent.pos.x, agent.pos.y + 0.9, agent.pos.z)
+  rig.follow(walkAim)
+}
+
+const walkAim = new THREE.Vector3()
 
 // ── pointer ───────────────────────────────────────────────────────────────────────────
 
@@ -455,6 +658,16 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.metaKey || e.ctrlKey || e.altKey) return
 
+  // Walking, the movement keys are the movement keys. `S` is the settings panel on the map
+  // and "back" on the deck, and there is no reading of that which lets both have it.
+  const key = e.key.toLowerCase()
+  if (walkingId && WALK_KEYS.has(key)) {
+    e.preventDefault()
+    if (key === ' ') colony.astronauts.hop(walkingId)
+    else held.add(key)
+    return
+  }
+
   switch (e.key) {
     case 'h':
     case 'H':
@@ -499,6 +712,14 @@ window.addEventListener('keydown', (e) => {
     case 'C':
       if (selectedProject) actions.newConversation()
       break
+    case 'g':
+    case 'G':
+      actions.toggleWalk()
+      break
+    case 'r':
+    case 'R':
+      if (selectedId) hud.toggleAsk()
+      break
     case '?':
       hud.toggleHelp()
       break
@@ -530,11 +751,17 @@ window.addEventListener('keydown', (e) => {
     // One step at a time, outward: the thread, then the zone it belongs to.
     case 'Escape':
       if (document.querySelector('.help.open')) hud.toggleHelp(false)
+      else if (walkingId) stopWalk()
       else if (selectedId) select(null, {})
       else if (selectedProject) actions.closeProject()
       break
   }
 })
+
+window.addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()))
+// Tabbing away with W down would otherwise come back to an astronaut walking into a wall
+// on its own, with nothing on the keyboard able to stop it.
+window.addEventListener('blur', () => held.clear())
 
 // ── data ──────────────────────────────────────────────────────────────────────────────
 
@@ -663,6 +890,7 @@ settings.onChange((changed, scope) => {
 
 engine.add({
   update(dt, elapsed) {
+    if (walkingId) driveInput()
     rig.update(dt)
     colony.update(dt, elapsed, rig.target)
     // Whatever the camera is orbiting is what should be in focus.

@@ -357,7 +357,7 @@ function hexPrism(radius, height) {
 // ── plot mesh ─────────────────────────────────────────────────────────────────────────
 
 export class Plot {
-  constructor({ id, name, index, cells, accent }) {
+  constructor({ id, name, index, cells, accent, occupied = new Set() }) {
     this.id = id
     this.name = name
     this.index = index
@@ -400,11 +400,102 @@ export class Plot {
     this.group.position.copy(this.center)
     this.group.name = `plot:${id}`
 
+    this.signSpot = this._signSpot(occupied)
     this._buildDeck()
     this._buildBorder()
     this._buildPosts()
     this._buildClutter()
     this.slots = this._buildSlots()
+
+    // Whether or not a repo turns out to have a README, the ground its sign would stand on
+    // is spoken for: laying it out after the crew had already been routed around the plot
+    // would put a post through somebody's path.
+    this.clutterSpots = this.clutterSpots || []
+    this.clutterSpots.push({ x: this.signSpot.x, z: this.signSpot.z, r: 0.55 })
+  }
+
+  /**
+   * Where the sign at the gate stands: on the deck of the outermost cell, on a corner that
+   * faces open ground.
+   *
+   * A *corner* rather than an edge, and a radius of 0.9 tiles, because that is the one ring
+   * of deck that is reliably empty. Buildings sit on a slot ring that reaches about 5.9
+   * units out, the accent kerb runs as a hexagon whose corners are 7.3 out, and this lands
+   * between the two — outside every building, inside the fence, whatever cells a plot holds.
+   *
+   * *Which* corner is the part that matters, and it is chosen against the rest of the
+   * lattice rather than against this plot alone. Boards face the camera, so a 2.7-unit board
+   * sweeps a 2.7-unit disc as you orbit; two plots that both picked the corner on their
+   * shared edge would have their signs standing about a unit apart and swinging through each
+   * other. A corner between two *empty* cells has nothing to collide with, so those are
+   * taken first, and a colony packed solid enough that no such corner exists falls back to
+   * pointing away from its own middle.
+   */
+  _signSpot(occupied) {
+    let index = 0
+    let far = -1
+    const mx = this.middle.x - this.center.x
+    const mz = this.middle.z - this.center.z
+    this.localCenters.forEach((p, i) => {
+      const d = (p.x - mx) ** 2 + (p.z - mz) ** 2
+      if (d > far) {
+        far = d
+        index = i
+      }
+    })
+
+    const cell = this.cells[index]
+    const local = this.localCenters[index]
+    // Outward from the middle — and for a single-cell plot, which has no outward, a stable
+    // direction taken off the repo's own name so it does not move between reloads.
+    const away = far > 0.01 ? Math.atan2(local.z - mz, local.x - mx) : (hashString(this.id) % 6) * (Math.PI / 3)
+
+    let best = 0
+    let bestScore = -Infinity
+    for (let k = 0; k < 6; k++) {
+      // The corner at 60k sits between the edges facing 60k±30, so these are the two cells
+      // it points between.
+      const free = [EDGE_TO_DIR[(k + 5) % 6], EDGE_TO_DIR[k]].filter((dir) => {
+        const q = cell.q + HEX_DIRS[dir][0]
+        const r = cell.r + HEX_DIRS[dir][1]
+        return !occupied.has(key(q, r)) && !this.cellKeys.has(key(q, r))
+      }).length
+
+      // How nearly this corner points the way the plot faces, as -1..1.
+      const aim = Math.cos((Math.PI / 3) * k - away)
+      const lamp = k === (index * 2) % 6 ? 1 : 0
+      const score = free * 4 + aim - lamp * 2
+      if (score > bestScore) {
+        bestScore = score
+        best = k
+      }
+    }
+
+    const [x, z] = corner(local.x, local.z, best, TILE * 0.93)
+    return { x, z, angle: (Math.PI / 3) * best }
+  }
+
+  /**
+   * Raise the sign, or take it down. Called once a repo's README has been read, and again
+   * whenever it changes — a plot with no README simply never gets one.
+   */
+  setSign(title, tagline) {
+    this.clearSign()
+    if (!title && !tagline) return null
+    const sign = createSign(title, tagline, this.accent)
+    sign.position.set(this.signSpot.x, DECK_TOP, this.signSpot.z)
+    // Facing out of the zone to begin with. The colony turns it to the camera from there.
+    sign.rotation.y = Math.PI / 2 - this.signSpot.angle
+    this.sign = sign
+    this.group.add(sign)
+    return sign
+  }
+
+  clearSign() {
+    if (!this.sign) return
+    this.group.remove(this.sign)
+    this.sign.userData.dispose?.()
+    this.sign = null
   }
 
   /** One merged slab of hex tiles. */
@@ -635,6 +726,9 @@ export class Plot {
   }
 
   dispose() {
+    // First, because a sign owns a canvas texture that a blanket geometry-and-material
+    // sweep would leave on the GPU.
+    this.clearSign()
     this.group.traverse((o) => {
       if (o.isMesh) {
         o.geometry.dispose()
@@ -738,6 +832,154 @@ export function createLabel(text, accent, pixelRatio = 4) {
     mat.dispose()
   }
   return mesh
+}
+
+// ── the sign at the gate ──────────────────────────────────────────────────────────────
+
+/** Board size in world units, and the canvas it is painted on. */
+const SIGN = { w: 2.7, h: 1.22, px: 260, ratio: 2, post: 1.5 }
+
+/**
+ * A repo's README, reduced to the two lines that fit on a board: what it calls itself, and
+ * the first sentence of what it is.
+ *
+ * Unlike a name plate this is an *object*, not a label — it stands on the deck at real
+ * scale, takes the light, casts a shadow from its post, and gets smaller as you pull out
+ * until it is a shape by the fence. That is the whole point of it: the sidebar can tell you
+ * what a repo is when you ask, and this tells you without being asked.
+ *
+ * One post rather than two, because the colony turns the whole sign to face the camera and
+ * a single central post is the one arrangement where that rotation is invisible.
+ */
+export function createSign(title, tagline, accent) {
+  const group = new THREE.Group()
+  const color = new THREE.Color(accent)
+
+  const post = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.062, 0.085, SIGN.post, 7),
+    new THREE.MeshStandardMaterial({ color: 0x8e8e97, roughness: 0.65, metalness: 0.35 })
+  )
+  post.position.y = SIGN.post / 2
+  post.castShadow = true
+  group.add(post)
+
+  const canvas = paintSign(title, tagline, color)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.minFilter = THREE.LinearMipmapLinearFilter
+  texture.magFilter = THREE.LinearFilter
+  texture.generateMipmaps = true
+  texture.anisotropy = 8
+
+  const board = new THREE.Mesh(
+    new THREE.PlaneGeometry(SIGN.w, SIGN.h),
+    new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      // Untone-mapped, like the name plates: a sign is backlit, so it stays readable at
+      // midnight instead of going out with the rest of the colony's albedo.
+      toneMapped: false,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      opacity: 0,
+    })
+  )
+  board.position.y = SIGN.post + SIGN.h / 2 - 0.12
+  group.add(board)
+
+  group.visible = false
+  group.userData.board = board
+  group.userData.dispose = () => {
+    texture.dispose()
+    board.geometry.dispose()
+    board.material.dispose()
+    post.geometry.dispose()
+    post.material.dispose()
+  }
+  return group
+}
+
+/** The board's face: an accent rule, the repo's own title, and its opening line under it. */
+function paintSign(title, tagline, color) {
+  const w = SIGN.px
+  const h = Math.round((SIGN.px * SIGN.h) / SIGN.w)
+  const canvas = document.createElement('canvas')
+  canvas.width = w * SIGN.ratio
+  canvas.height = h * SIGN.ratio
+  const c = canvas.getContext('2d')
+  c.scale(SIGN.ratio, SIGN.ratio)
+
+  const pad = 11
+  const radius = 7
+  roundRect(c, 1, 1, w - 2, h - 2, radius)
+  c.fillStyle = 'rgba(14,15,19,0.93)'
+  c.fill()
+  c.lineWidth = 2
+  c.strokeStyle = `rgba(${(color.r * 255) | 0},${(color.g * 255) | 0},${(color.b * 255) | 0},0.85)`
+  c.stroke()
+
+  // The accent bar along the top ties the board to the kerb around the same plot.
+  roundRect(c, pad, 7, w - pad * 2, 2.5, 1.25)
+  c.fillStyle = '#' + color.getHexString()
+  c.fill()
+
+  let y = 17
+  c.textAlign = 'left'
+  c.textBaseline = 'top'
+  c.fillStyle = '#f4f2ee'
+  c.font = '700 15px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif'
+  y = wrapText(c, title || '', pad, y, w - pad * 2, 17, 2)
+
+  if (tagline) {
+    c.fillStyle = 'rgba(226,224,218,0.66)'
+    c.font = '400 11px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif'
+    wrapText(c, tagline, pad, y + 4, w - pad * 2, 13.5, 2)
+  }
+  return canvas
+}
+
+/**
+ * Wrap into at most `max` lines, eliding the last one. Returns the baseline after the
+ * block, so the caller can stack the next one under it.
+ */
+function wrapText(c, text, x, y, width, lineHeight, max) {
+  const words = String(text).split(/\s+/).filter(Boolean)
+  const lines = []
+  let line = ''
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word
+    if (c.measureText(next).width <= width || !line) {
+      line = next
+      continue
+    }
+    lines.push(line)
+    line = word
+    if (lines.length === max) break
+  }
+  if (lines.length < max && line) lines.push(line)
+
+  // The last line carries whatever did not fit, so it is the one that gets the ellipsis.
+  if (words.length && lines.length === max) {
+    const used = lines.join(' ').split(/\s+/).length
+    if (used < words.length) {
+      let last = lines[max - 1]
+      while (last && c.measureText(`${last}…`).width > width) last = last.slice(0, -1).trimEnd()
+      lines[max - 1] = `${last}…`
+    }
+  }
+
+  lines.forEach((text, i) => c.fillText(text, x, y + i * lineHeight))
+  return y + lines.length * lineHeight
+}
+
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath()
+  c.moveTo(x + r, y)
+  c.arcTo(x + w, y, x + w, y + h, r)
+  c.arcTo(x + w, y + h, x, y + h, r)
+  c.arcTo(x, y + h, x, y, r)
+  c.arcTo(x, y, x + w, y, r)
+  c.closePath()
 }
 
 export function hashString(str) {

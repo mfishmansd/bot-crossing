@@ -180,8 +180,15 @@ into the same repo. Picking somebody is also picking the zone they are standing 
   action uses, so the desktop app opens an empty session with the repo as its workspace —
   nothing is resumed and nothing is written.
 - **Finder** (Explorer on Windows) opens the folder, **Copy path** copies it.
-- Underneath, everything running in that repo, whoever wants something first. Clicking one
-  flies to its astronaut and selects it.
+- Underneath, two tabs. **Threads** is everything running in that repo, whoever wants
+  something first — clicking one flies to its astronaut and selects it. **Readme** is that
+  repo's own `README.md`, rendered.
+
+The readme is read straight off your disk and rendered in the page, by a small markdown
+renderer written for exactly the subset a README uses. Raw HTML is stripped to its text and
+images are dropped entirely — including badges, which would otherwise have a page that
+talks to nothing but localhost start fetching from shields.io the moment you clicked a
+zone. A repo with no README says so; it is not an error.
 
 **The thread**, when an astronaut is selected, in a card parked **beside that astronaut**
 rather than in the panel: its face, title, worktree, branch, model, last activity, and how
@@ -191,6 +198,9 @@ flipping to its left rather than sliding under the sidebar, and never leaving th
 It is moved with a transform rather than with `left`/`top`, the one geometric change a
 browser makes without touching layout, so following a walking astronaut costs nothing.
 
+- **What is this place?** (`R`) is the astronaut answering for the repo it is standing on:
+  the opening line of that README, in its own card. **Read the whole readme** hands you over
+  to the panel.
 - **Open** hands the thread back to Claude Code and the desktop app comes forward.
 - **Archive** sets `isArchived` on Claude Code's own session record — the thread lands in
   Claude Code's Archived list, not just here — and the astronaut walks back up the ramp and
@@ -262,6 +272,8 @@ under **View → Return to isometric**.
 | `N` | Fly to the next astronaut waiting on you |
 | `Enter` / `A` | Open / archive the selected thread |
 | `C` | New conversation in the open zone's folder |
+| `R` | Ask the selected astronaut what the repo it is standing on is |
+| `G` | Walk as an astronaut. `WASD` to move, `⇧` to run, `space` to hop, `Esc` to let go |
 | `O` | Orbit mode |
 | `Tab` | Next planet |
 | `L` | Next time of day |
@@ -269,6 +281,52 @@ under **View → Return to isometric**.
 | `0` | Reset the view |
 | `Esc` | Deselect, and close the zone sidebar |
 | `?` | Help |
+
+## Walking one of them
+
+`G`, or the little figure in the left rail, hands you one of the crew. Whoever is selected,
+or whoever is nearest the middle of the view if nobody is — asking you to pick somebody
+first would make it two steps, and the whole appeal is that it is one.
+
+`WASD` or the arrows walk, `⇧` runs, `space` hops, dragging looks around, and `Esc` gives
+them back. The astronaut you are wearing turns **blue** — suit, trim and eyes — because
+every other one on the surface is a near-white by design, and finding yourself in a crowd of
+four hundred should be a glance rather than a search.
+
+Almost none of this is new machinery, which is the point:
+
+- The astronaut is one of the crew with its own state machine suspended. It keeps its
+  thread, its badge and its card; it simply stops being told where to go.
+- Collision is the same nav grid every other astronaut is already sliding against, so you
+  cannot walk through a habitat and neither can they.
+- The camera is the same Google Earth rig with its target pinned to a moving point instead
+  of a still one. Its map framing is put away on the way in and handed straight back on the
+  way out, so a mode can never lose you your view.
+
+Two things do change while you are down there. Movement is **camera-relative** — `W` is away
+from the camera rather than north, because the camera can be spun to any heading and a fixed
+compass would have you pressing different keys to walk the same way. And the **tilt-shift is
+turned down to a third**: the shallow focus is what makes the colony read as a model on a
+table, and it is exactly what you do not want from inside it, where the plane of focus sits
+a few metres out and everything past it is fog.
+
+A thread that gets archived, or drops out of a scan, takes its astronaut back — you land on
+the map with a note saying so, rather than following a ghost.
+
+### The grid had to grow first
+
+Walking turned up a bug that had been there all along. The navigable grid was a fixed 56
+units either side of the ship, sized for the colony this was written against; a projects
+directory of two hundred repos spirals out past ninety. Every cell out there read as
+blocked, so the crew that walked to those zones spent the rest of the session wedged against
+an invisible wall — which is what the crowd permanently bunched around the landing pad
+actually was. The grid is sized to the colony's own footprint now, rebuilt when that
+footprint changes, and hysteretic about shrinking so a repo flickering in and out of a scan
+cannot reallocate seven typed arrays twice a poll.
+
+The one place that treats the edge differently is you: off the end of the grid counts as
+walkable for an astronaut under a hand, so you can walk out onto the empty ground and look
+back at the place.
 
 ## Planets and light
 
@@ -495,6 +553,31 @@ What keeps it cheap at rest:
   geometry.
 - Particles live in flat typed arrays and are swap-removed on death — no allocation during play.
 
+### The sign at the gate
+
+A zone's name plate says what a repo is *called*. The sign standing on its deck says what it
+**is**: the title out of that repo's README and the first sentence under it, painted to a
+canvas and mounted on a post at the corner of the outermost tile.
+
+Unlike a plate this is an object rather than a label. It stands at real scale, takes the
+light, and gets smaller as you pull out — fading away entirely past about eighty units,
+where two lines of small type stop being words and start being a grey smudge. It turns to
+face the camera so it can be read, but only about seventy degrees off the way its plot
+faces; past that it would be swinging back over its own buildings, and a sign you can walk
+behind reads as a sign rather than as a billboard following you around.
+
+Three things keep this affordable in a colony of two hundred repos, where the naive version
+is three hundred megabytes of texture for boards you cannot read:
+
+- **Signs are raised and disposed as you move.** Only the nearest couple of dozen zones
+  inside the fade distance have one at all.
+- **A README is only read when its zone comes near enough to want a sign**, so a projects
+  directory is not two hundred file reads at boot.
+- **Corners are chosen against the whole lattice.** A board sweeps a disc of its own width
+  as it turns, so two neighbouring plots that both picked the corner on their shared edge
+  would have their signs swinging through each other. Corners pointing at *empty* cells are
+  taken first, and a minimum spacing catches whatever is left.
+
 ### Things that hold their size on screen
 
 Badges and name plates are deliberately near-constant on screen, which inverts the usual
@@ -612,14 +695,15 @@ server/
   lib/         filesystem helpers the adapters share
   scan.mjs     harness-agnostic: asks every detected harness, merges, sorts
   api.mjs      /api/threads, /api/harnesses, /api/state, /api/open, /api/archive,
-               /api/new-session, /api/reveal
+               /api/new-session, /api/reveal, /api/readme
+  readme.mjs   finds and reads a repo's README, capped and cached on its mtime
   serve.mjs    static server for the built app
 src/
   core/        settings, renderer + post chain, the Google Earth camera
   world/       planets, terrain, sky, hex plots, the model kit, buildings, the ship
   agents/      the crew rig and its bake, instanced astronauts, faces, badges, particles
   game/        threads → colony, and the API client
-  ui/          the HUD
+  ui/          the HUD, and the small markdown renderer the readme pane uses
 tools/         asset packers — raw packs in, the three glbs the app loads out
 public/assets/ spacebase.glb, crew.glb, forest.glb
 ```

@@ -138,6 +138,7 @@ const DEFAULTS = {
   autoFrame: false, // ease the camera back to isometric when you stop dragging; opt-in
   showFps: false,
   showLabels: true,
+  showSigns: true, // the readme board on each repo's plot
   reducedMotion: false,
 }
 

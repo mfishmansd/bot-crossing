@@ -38,3 +38,6 @@ export const archiveThread = (thread, archived) =>
 export const newSession = (folder, harness) => post('/api/new-session', { folder, harness })
 
 export const revealFolder = (folder) => post('/api/reveal', { folder })
+
+/** A repo's README, as raw markdown. `{ found: false }` for a folder that has not got one. */
+export const fetchReadme = (folder) => req(`/api/readme?folder=${encodeURIComponent(folder)}`)

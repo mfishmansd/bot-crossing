@@ -1,3 +1,5 @@
+import * as THREE from 'three'
+
 /**
  * Where the astronauts are allowed to walk.
  *
@@ -21,8 +23,18 @@
 
 /** Cell size, in metres. Small enough to resolve the gaps between neighbouring buildings. */
 const CELL = 0.5
-/** Half-width of the navigable square. Comfortably contains the colony and the landing pad. */
+/**
+ * Half-width of the navigable square at rest, and the most it may grow to.
+ *
+ * This used to be a single fixed 56, which was fine for the colony it was written against
+ * and quietly wrong for a big one: a projects directory of two hundred repos spirals out
+ * past ninety units, every cell out there reads as blocked, and the crew that walked to it
+ * spends the rest of the session wedged against an invisible wall. The grid is sized to the
+ * colony now — see `resize` — and the ceiling is only there so a corrupt layout cannot ask
+ * for a gigabyte of bitmap.
+ */
 const HALF = 56
+const MAX_HALF = 320
 /** Give up rather than stall the frame if a search goes pathological. */
 const MAX_EXPANSIONS = 6000
 
@@ -31,8 +43,15 @@ const SQRT2 = Math.SQRT2
 export class Navigation {
   constructor() {
     this.cell = CELL
-    this.half = HALF
-    this.size = Math.ceil((HALF * 2) / CELL)
+    this.generation = 0
+    /** Bumped on every rebuild; agents use it to notice their path is stale. */
+    this.version = 0
+    this._allocate(HALF)
+  }
+
+  _allocate(half) {
+    this.half = half
+    this.size = Math.ceil((half * 2) / this.cell)
     const n = this.size * this.size
 
     this.blocked = new Uint8Array(n)
@@ -44,10 +63,25 @@ export class Navigation {
     this.heap = new Int32Array(n)
     this.heapKey = new Float32Array(n)
     this.heapSize = 0
-
+    // Every stamp is zero again, so the generation has to leave zero behind or the first
+    // search of the new grid would read stale nodes as already visited.
     this.generation = 0
-    /** Bumped on every rebuild; agents use it to notice their path is stale. */
-    this.version = 0
+  }
+
+  /**
+   * Grow the navigable square to hold a colony of a given reach. Called before each rebuild
+   * with the colony's own extent, so the grid is as big as it has to be and no bigger — the
+   * arrays here are per-cell and a square grows with the square of its side.
+   *
+   * Shrinking is deliberately hysteretic: a colony that loses its outermost zone gets its
+   * grid back only once it is well inside, so a repo flickering in and out of a scan cannot
+   * reallocate seven typed arrays twice a poll.
+   */
+  resize(reach) {
+    const want = THREE.MathUtils.clamp(Math.ceil(reach / 8) * 8 + 8, HALF, MAX_HALF)
+    if (want === this.half || (want < this.half && want > this.half - 24)) return false
+    this._allocate(want)
+    return true
   }
 
   // ── grid <-> world ──────────────────────────────────────────────────────────────────
@@ -64,11 +98,18 @@ export class Navigation {
     return ix >= 0 && iz >= 0 && ix < this.size && iz < this.size
   }
 
-  /** True where an astronaut may not stand. Outside the grid counts as blocked. */
-  isBlocked(x, z) {
+  /**
+   * True where an astronaut may not stand.
+   *
+   * Off the edge of the grid counts as blocked, which is what keeps the crew inside the
+   * colony they belong to. `outside` exists for the one caller that wants the opposite —
+   * somebody you are steering by hand, who should be able to walk off the end of the map
+   * rather than hit a wall that is not there.
+   */
+  isBlocked(x, z, outside = true) {
     const ix = this.toCell(x)
     const iz = this.toCell(z)
-    if (!this.inBounds(ix, iz)) return true
+    if (!this.inBounds(ix, iz)) return outside
     return this.blocked[iz * this.size + ix] === 1
   }
 
@@ -300,9 +341,9 @@ export class Navigation {
    * "never walks through a building" a property of the movement rather than a property of
    * the pathfinder having succeeded.
    */
-  slide(pos, dx, dz) {
+  slide(pos, dx, dz, outside = true) {
     // An agent a building was dropped on top of has no legal move at all; walk it out.
-    if (this.isBlocked(pos.x, pos.z)) {
+    if (this.isBlocked(pos.x, pos.z, outside)) {
       const free = this.nearestFree(pos.x, pos.z)
       if (free) {
         const fx = this.toWorld(free.ix)
@@ -317,16 +358,16 @@ export class Navigation {
 
     const nx = pos.x + dx
     const nz = pos.z + dz
-    if (!this.isBlocked(nx, nz)) {
+    if (!this.isBlocked(nx, nz, outside)) {
       pos.x = nx
       pos.z = nz
       return true
     }
-    if (dx !== 0 && !this.isBlocked(nx, pos.z)) {
+    if (dx !== 0 && !this.isBlocked(nx, pos.z, outside)) {
       pos.x = nx
       return true
     }
-    if (dz !== 0 && !this.isBlocked(pos.x, nz)) {
+    if (dz !== 0 && !this.isBlocked(pos.x, nz, outside)) {
       pos.z = nz
       return true
     }

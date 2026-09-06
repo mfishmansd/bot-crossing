@@ -5,6 +5,14 @@ const MIN_POLAR = THREE.MathUtils.degToRad(6)
 const MAX_POLAR = THREE.MathUtils.degToRad(84)
 const MIN_DIST = 4
 const MAX_DIST = 150
+/**
+ * Zoom limits while you are walking an astronaut about. Much tighter than the map's, because
+ * a follow camera a hundred units out is not a follow camera, it is the map again with a
+ * dot moving on it — and one closer than this is inside the helmet.
+ */
+const WALK_DIST = { min: 4, max: 30, rest: 9 }
+/** Nearer the horizon than the map's isometric rest: walking, you want to see ahead. */
+const WALK_POLAR = THREE.MathUtils.degToRad(68)
 const WORLD_LIMIT = 82
 /** Orbit mode's rate: about two minutes a revolution, slow enough to watch. */
 const ORBIT_RATE = 0.055
@@ -60,6 +68,9 @@ export class CameraRig {
     this.desiredPolar = ISO_POLAR
     this.distance = 62
     this.desiredDistance = 62
+    /** True while the camera is following an astronaut you are steering. */
+    this.walking = false
+    this._mapView = null
 
     this.idleFor = 0
     this.interacting = false
@@ -133,8 +144,11 @@ export class CameraRig {
       return
     }
 
-    // Right, middle, ctrl or shift all mean "tilt and rotate", as in Earth.
-    const orbit = e.button === 2 || e.button === 1 || e.ctrlKey || e.shiftKey || e.altKey
+    // Right, middle, ctrl or shift all mean "tilt and rotate", as in Earth. Walking, every
+    // drag means that: the ground is not yours to grab while the camera is pinned to
+    // somebody walking across it, and a drag that panned would be fighting the follow.
+    const orbit =
+      this.walking || e.button === 2 || e.button === 1 || e.ctrlKey || e.shiftKey || e.altKey
     this._mode = orbit ? 'orbit' : 'pan'
     this._last.set(e.clientX, e.clientY)
     this.interacting = true
@@ -235,9 +249,12 @@ export class CameraRig {
     const raw = (e.deltaY * unit) / 100
     const step = Math.sign(raw) * Math.min(Math.abs(raw), 2.5) * (e.ctrlKey ? 1.6 : 1)
 
-    this.desiredDistance = THREE.MathUtils.clamp(this.desiredDistance * (1 + step * 0.16), MIN_DIST, MAX_DIST)
-    // Hold the point under the pointer still for as long as the dolly takes to settle.
-    if (this.groundPoint(e.clientX, e.clientY, this._hit2)) {
+    const lo = this.walking ? WALK_DIST.min : MIN_DIST
+    const hi = this.walking ? WALK_DIST.max : MAX_DIST
+    this.desiredDistance = THREE.MathUtils.clamp(this.desiredDistance * (1 + step * 0.16), lo, hi)
+    // Hold the point under the pointer still for as long as the dolly takes to settle —
+    // except when following somebody, where the point under the pointer is not staying put.
+    if (!this.walking && this.groundPoint(e.clientX, e.clientY, this._hit2)) {
       this._zoom = { world: this._hit2.clone(), sx: e.clientX, sy: e.clientY }
     }
     this.idleFor = 0
@@ -276,6 +293,42 @@ export class CameraRig {
     if (distance) this.desiredDistance = THREE.MathUtils.clamp(distance, MIN_DIST, MAX_DIST)
     this._zoom = null
     this.idleFor = 99 // settle to isometric right away rather than after a pause
+  }
+
+  /**
+   * Follow a point rather than sit on one. Written straight to the desired target and left
+   * for `update` to damp toward, so the camera trails the astronaut by a few frames — which
+   * is what makes it read as a camera following somebody rather than a rig bolted to them.
+   *
+   * Deliberately not clamped to the world limit: that limit is there to stop you dragging
+   * the map into empty space, and it has no business stopping you *walking* there.
+   */
+  follow(point) {
+    this.desiredTarget.set(point.x, point.y, point.z)
+  }
+
+  /**
+   * Enter or leave walk mode. The map's framing is put away on the way in and handed back
+   * on the way out — coming back to a colony you had lined up and finding it at a stranger's
+   * zoom is the sort of thing that makes a mode feel like a trapdoor.
+   */
+  setWalking(on) {
+    if (on === this.walking) return
+    this.walking = on
+    this.orbiting = false
+    this._zoom = null
+    if (on) {
+      this._mapView = { distance: this.desiredDistance, polar: this.desiredPolar, target: this.desiredTarget.clone() }
+      this.desiredDistance = WALK_DIST.rest
+      this.desiredPolar = WALK_POLAR
+    } else if (this._mapView) {
+      this.desiredDistance = this._mapView.distance
+      this.desiredPolar = this._mapView.polar
+      this.desiredTarget.copy(this._mapView.target)
+      this._clampTarget()
+      this._mapView = null
+    }
+    this.idleFor = 0
   }
 
   resetView() {
@@ -347,7 +400,7 @@ export class CameraRig {
 
     // Rest back to isometric: after a beat of no input the heading walks to the nearest
     // clean 45° and the tilt returns to the iso angle. Position and zoom are left alone.
-    if (!this.orbiting && this.settings.get('autoFrame') && this.idleFor > 2.2 && !this.interacting) {
+    if (!this.orbiting && !this.walking && this.settings.get('autoFrame') && this.idleFor > 2.2 && !this.interacting) {
       const ease = Math.min(1.4, (this.idleFor - 2.2) * 0.7)
       this.desiredAzimuth = damp(this.desiredAzimuth, this._nearestIso(), ease, dt)
       this.desiredPolar = damp(this.desiredPolar, ISO_POLAR, ease, dt)

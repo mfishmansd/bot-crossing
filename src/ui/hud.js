@@ -41,6 +41,8 @@ const ICON = {
   plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 11.7a8 8 0 0 1-8.5 8 9.3 9.3 0 0 1-2.7-.4L4.5 21l1.4-4.1a7.9 7.9 0 0 1-2.4-5.7A8 8 0 0 1 12 3.6a8 8 0 0 1 8.5 8.1z"/><path d="M12 8.6v5.4M9.3 11.3h5.4"/></svg>`,
   folder: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.4A1.4 1.4 0 0 1 4.4 6h4.2l2 2.5h7A1.4 1.4 0 0 1 19 9.9v7.7a1.4 1.4 0 0 1-1.4 1.4H4.4A1.4 1.4 0 0 1 3 17.6z"/></svg>`,
   copy: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>`,
+  book: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H10a2.5 2.5 0 0 1 2 1 2.5 2.5 0 0 1 2-1h4.5A1.5 1.5 0 0 1 20 5.5v12a1.5 1.5 0 0 1-1.5 1.5H14a2.5 2.5 0 0 0-2 1 2.5 2.5 0 0 0-2-1H5.5A1.5 1.5 0 0 1 4 17.5z"/><path d="M12 6v13"/></svg>`,
+  walk: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="4.2" r="1.9"/><path d="M12.4 21l1-5.4-2.6-2.2.8-4.6"/><path d="M11.6 8.8 8.4 10l-1.2 3.1"/><path d="m11.6 8.8 3.5 1.3 1.9 2.9"/><path d="m13.4 15.6 3 5.4"/></svg>`,
   locate: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7.6"/><path d="M12 1.8v2.6M12 19.6v2.6M1.8 12h2.6M19.6 12h2.6"/></svg>`,
   orbit: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="4"/><ellipse cx="12" cy="12" rx="10.2" ry="4.6" transform="rotate(-24 12 12)"/><circle cx="21" cy="8.2" r="1.5" fill="currentColor" stroke="none"/></svg>`,
 }
@@ -225,6 +227,7 @@ export class Hud {
       this._toggle('Return to isometric', 'autoFrame', 'Eases the angle back when you stop dragging.'),
       this._slider('Field of view', 'fov', 20, 60, 1, (v) => `${v}°`),
       this._toggle('Project labels', 'showLabels'),
+      this._toggle('Readme signs', 'showSigns', 'The board on each plot, carrying the first line of that repo’s README.'),
       this._toggle('Reduced motion', 'reducedMotion', 'Calms the bobbing and the camera easing.'),
       this._toggle('Show FPS', 'showFps')
     )
@@ -343,6 +346,16 @@ export class Hud {
     on('#btn-copy-path', 'click', () => this.actions.copyProjectPath?.())
     on('#btn-locate', 'click', () => this.actions.focusProject?.(this.project?.name))
     on('#btn-close-project', 'click', () => this.actions.closeProject?.())
+    on('#btn-ask', 'click', () => this.toggleAsk())
+    on('#btn-walk', 'click', () => this.actions.toggleWalk?.())
+    on('#btn-walk-stop', 'click', () => this.actions.toggleWalk?.())
+    on('#btn-read-more', 'click', () => {
+      this.setTab('readme')
+      this.$('.readme').scrollTop = 0
+    })
+    for (const tab of this.el.querySelectorAll('.tabs .tab')) {
+      tab.addEventListener('click', () => this.setTab(tab.dataset.tab))
+    }
     on('.help', 'click', (e) => {
       if (e.target === this.$('.help')) this.toggleHelp(false)
     })
@@ -410,6 +423,7 @@ export class Hud {
       this.project = null
       if (this._last.project === null) return
       this._last.project = null
+      this._tabProject = null
       panel.classList.remove('drilled')
       return
     }
@@ -420,8 +434,17 @@ export class Hud {
     // you leave the panel open.
     const signature =
       `${project.name}~${project.path}~${project.accent}~${project.selectedId}~${Math.floor(Date.now() / 60000)}~` +
+      // The README lands one round trip after the rest of the panel, so its arrival has to
+      // move the signature or the pane it fills would stay on "reading…" until a thread moved.
+      `${project.readme?.state}:${project.readme?.key ?? ''}~` +
       project.threads.map((t) => `${t.id}:${t.status}:${t.title}:${t.lastActivityAt}`).join('|')
     panel.classList.add('drilled')
+    // Drilling into a different repo starts you on its threads, whatever you were reading
+    // in the last one.
+    if (this._tabProject !== project.name) {
+      this._tabProject = project.name
+      this.setTab('threads')
+    }
     if (this._last.project === signature) return
     this._last.project = signature
 
@@ -439,8 +462,10 @@ export class Hud {
 
     const n = project.threads.length
     const waiting = project.threads.filter((t) => t.status === 'waiting' || t.status === 'blocked').length
-    this.$('.side .threads-head').innerHTML =
-      `<span>${n} thread${n === 1 ? '' : 's'}</span>` + (waiting ? `<span class="want">${waiting} need you</span>` : '')
+    this.$('.tabs .tab[data-tab="threads"] .n').textContent = String(n)
+    this.$('.side .threads-head').innerHTML = waiting ? `<span class="want">${waiting} need you</span>` : ''
+    this.$('.side .threads-head').hidden = !waiting
+    this._setReadme(project.readme)
 
     const list = this.$('.side .threads')
     // A poll rewrites these rows every time a live thread's timestamp moves. Losing your
@@ -477,6 +502,119 @@ export class Hud {
     }
     list.scrollTop = scroll
     if (!project.selectedId) this._scrolledTo = null
+    this._syncSays()
+  }
+
+  /**
+   * Threads or readme — the two things a repo panel can be showing.
+   *
+   * One at a time rather than stacked, for the same reason drilling in replaces the repo
+   * list rather than pushing it up: at 320px across, two scrolling panes is two half-panes.
+   */
+  setTab(tab) {
+    const next = tab === 'readme' ? 'readme' : 'threads'
+    this.tab = next
+    this.$('.project-detail').dataset.tab = next
+    for (const el of this.el.querySelectorAll('.tabs .tab')) {
+      el.setAttribute('aria-pressed', String(el.dataset.tab === next))
+    }
+  }
+
+  /**
+   * The rendered README, or the honest reason there isn't one. A repo with no README is not
+   * an error and does not get an error's styling — most repos worth having on a map have
+   * never had one written.
+   */
+  _setReadme(readme) {
+    const pane = this.$('.readme')
+    const tab = this.$('.tabs .tab[data-tab="readme"]')
+    const state = readme?.state || 'loading'
+    tab.dataset.state = state
+
+    if (state === 'ready' && readme.html) {
+      pane.className = 'readme'
+      pane.innerHTML = readme.html
+      // Every link in here came out of a file on disk. `noopener` is set at render time;
+      // this is the belt to that pair of braces.
+      for (const a of pane.querySelectorAll('a')) a.rel = 'noopener noreferrer'
+      return
+    }
+    pane.className = 'readme empty'
+    pane.innerHTML =
+      state === 'loading'
+        ? '<p>Reading…</p>'
+        : state === 'error'
+          ? `<p>Could not read it. ${escapeHtml(readme?.error || '')}</p>`
+          : '<p>No readme in this folder — nobody has written down what this place is.</p>'
+  }
+
+  /**
+   * Show or hide the walk bar. `name` is the thread you are wearing; `null` means you have
+   * let go.
+   *
+   * The bar is the only chrome walk mode adds, and it exists because every key it uses is a
+   * key that means something else on the map. Somewhere on screen has to say so.
+   */
+  setWalking(name) {
+    this.walking = Boolean(name)
+    this.$('.walkbar').classList.toggle('on', this.walking)
+    this.$('#btn-walk').setAttribute('aria-pressed', String(this.walking))
+    if (name) this.$('.walkbar .who b').textContent = name
+  }
+
+  /** Ask the astronaut what it is standing on, or stop asking. */
+  toggleAsk(on = !this.asking) {
+    this.asking = Boolean(on)
+    this._syncSays()
+  }
+
+  /**
+   * What the selected astronaut says about its own repo.
+   *
+   * Deliberately in the astronaut's card rather than in a bubble of its own: the card is
+   * already placed against the astronaut every frame, already flips around the sidebar and
+   * already knows how to stay on screen, and a second floating panel would have to learn
+   * all three of those things to say one sentence.
+   */
+  _syncSays() {
+    const says = this.$('.thread-pop .says')
+    const ask = this.$('#btn-ask')
+    if (!says) return
+    const readme = this.project?.readme
+    const summary = readme?.summary
+    const open = Boolean(this.asking && this.selected)
+
+    ask.hidden = !this.selected
+    ask.setAttribute('aria-pressed', String(open))
+    says.hidden = !open
+    if (!open) {
+      this._measureCard()
+      return
+    }
+
+    const name = this.project?.name || 'this place'
+    const line =
+      readme?.state === 'loading'
+        ? 'Let me find the readme…'
+        : summary?.tagline
+          ? `“${summary.tagline}”`
+          : summary?.title
+            ? `“${summary.title}” — that is all the readme says.`
+            : `There is no readme in ${name}. Nobody has written down what we are building.`
+
+    this.$('.thread-pop .says .line').textContent = line
+    this.$('#btn-read-more').hidden = readme?.state !== 'ready'
+    this._measureCard()
+  }
+
+  /**
+   * The card's size, taken once whenever it changes rather than every frame — placing it
+   * beside its astronaut needs the number sixty times a second, and asking the layout for
+   * it that often is how a HUD starts costing frames.
+   */
+  _measureCard() {
+    const card = this.$('.thread-pop')
+    if (this.selected) this._cardSize = { w: card.offsetWidth, h: card.offsetHeight }
   }
 
   /**
@@ -491,8 +629,12 @@ export class Hud {
     if (!agent || !thread) {
       card.classList.remove('on')
       this.selected = null
+      this.toggleAsk(false)
       return
     }
+    // A different astronaut is a different question, so it is asked again rather than
+    // inheriting the last one's answer.
+    if (this.selected?.thread?.id !== thread.id) this.asking = false
     this.selected = { agent, thread }
     card.classList.add('on')
 
@@ -512,11 +654,8 @@ export class Hud {
     const pct = Math.round((this.actions.progressFor?.(thread.id) ?? 0) * 100)
     this.$('.thread-pop .progress > i').style.width = `${pct}%`
     this.$('.thread-pop .progress > i').style.background = hex(agent.trim.getHex())
-    // Measured once per selection rather than per frame: placing the card beside its
-    // astronaut needs its size sixty times a second, and asking the layout for it that
-    // often is how a HUD starts costing frames.
-    this._cardSize = { w: card.offsetWidth, h: card.offsetHeight }
     this.$('#btn-open').disabled = thread.canOpen === false
+    this._syncSays()
   }
 
   /**
@@ -845,8 +984,13 @@ const TEMPLATE = `
           <button class="btn" id="btn-copy-path" title="Copy the folder path">${ICON.copy} Copy path</button>
         </div>
       </div>
+      <div class="tabs">
+        <button class="tab" type="button" data-tab="threads" aria-pressed="true">Threads<span class="n"></span></button>
+        <button class="tab" type="button" data-tab="readme" aria-pressed="false">Readme</button>
+      </div>
       <div class="threads-head"></div>
       <div class="threads"></div>
+      <div class="readme"></div>
     </div>
   </div>
 </aside>
@@ -855,6 +999,7 @@ const TEMPLATE = `
   <button class="btn icon" id="btn-home" title="Reset the view (0)">${ICON.home}</button>
   <button class="btn icon" id="btn-next" title="Next astronaut waiting on you (N)">${ICON.next}</button>
   <div class="sep"></div>
+  <button class="btn icon" id="btn-walk" title="Walk as an astronaut (G)" aria-pressed="false">${ICON.walk}</button>
   <button class="btn icon" id="btn-orbit" title="Orbit mode — sweep around the colony (O)" aria-pressed="false">${ICON.orbit}</button>
   <button class="btn icon" id="btn-planet" title="Change planet (Tab)">${ICON.globe}</button>
   <button class="btn icon" id="btn-time" title="Change the time of day (L)">${ICON.sun}</button>
@@ -880,6 +1025,22 @@ const TEMPLATE = `
     <button class="btn primary" id="btn-open" title="Open this thread in the harness it came from (Enter)">${ICON.open} Open</button>
     <button class="btn" id="btn-archive" title="Archive — this astronaut walks back to the ship (A)">${ICON.archive} Archive</button>
   </div>
+  <button class="btn ghost ask" id="btn-ask" title="Ask what this repo is (R)">${ICON.book} What is this place?</button>
+  <div class="says" hidden>
+    <p class="line"></p>
+    <button class="btn ghost more" id="btn-read-more" type="button">Read the whole readme</button>
+  </div>
+</div>
+
+<div class="walkbar panel">
+  <span class="who"><i class="dot"></i><b></b></span>
+  <span class="keys">
+    <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk
+    <kbd>⇧</kbd> run
+    <kbd>space</kbd> hop
+    <kbd>drag</kbd> look
+  </span>
+  <button class="btn" id="btn-walk-stop">Let go <kbd>Esc</kbd></button>
 </div>
 
 <div class="toasts"></div>
@@ -907,6 +1068,8 @@ const TEMPLATE = `
         <div class="k"><span>Open thread</span><kbd>Enter</kbd></div>
         <div class="k"><span>Archive</span><kbd>A</kbd></div>
         <div class="k"><span>New conversation</span><kbd>C</kbd></div>
+        <div class="k"><span>What is this place?</span><kbd>R</kbd></div>
+        <div class="k"><span>Walk as an astronaut</span><kbd>G</kbd></div>
         <div class="k"><span>Orbit mode</span><kbd>O</kbd></div>
         <div class="k"><span>Change planet</span><kbd>Tab</kbd></div>
         <div class="k"><span>Time of day</span><kbd>L</kbd></div>

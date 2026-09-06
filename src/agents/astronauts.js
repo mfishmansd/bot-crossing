@@ -28,6 +28,19 @@ import { attachMatrixAt, decorateSkinned, frameFor } from './crew.js'
 
 const SUIT_TONES = [0xf3f1ec, 0xe8e4dc, 0xf7f4ee, 0xdfe4e8, 0xf1e9df]
 
+/**
+ * The suit you wear when you are the one walking.
+ *
+ * Every other astronaut in the colony is one of five near-whites, which is the point of
+ * them: a crowd of four hundred reads as a crowd. So the one under your hand is the one
+ * thing on screen that is *not* — blue suit, blue trim, blue eyes — and finding yourself in
+ * that crowd is a glance rather than a search.
+ *
+ * Applied over the top of whatever the thread's status says, and put back the moment you
+ * let go, so nothing about the colour is persisted anywhere.
+ */
+const DRIVE_LOOK = { suit: 0x5f93de, trim: 0x4f7ec9, eye: [0.45, 1.5, 3.0] }
+
 /** Trim + eye colour per behaviour. Eyes are pushed past 1.0 so the bloom pass catches them. */
 const AGENT_LOOK = {
   working: { trim: 0x4f9a63, eye: [0.35, 2.5, 1.15] },
@@ -76,6 +89,39 @@ const DRIFT_PACE = 0.55
 const ARRIVE_RADIUS = SEPARATION + 0.45
 /** Paths computed per frame. Re-routing the whole crew takes a few frames, unnoticeably. */
 const PATH_BUDGET = 6
+
+/**
+ * The astronaut you are steering yourself.
+ *
+ * Faster than the crew's amble on purpose: a colony of two hundred zones is a long way
+ * across, and a walk speed tuned for pottering around one plot makes crossing it a chore.
+ * Acceleration is high and turning is instant-ish, because everything about a character
+ * under a hand is judged on whether it answers the key, not on whether it looks unhurried.
+ */
+const DRIVE_SPEED = 3.6
+const DRIVE_RUN = 2.0
+const DRIVE_ACCEL = 14
+const DRIVE_TURN = 14
+/**
+ * Hop height and gravity, in the same units the colony is built in.
+ *
+ * Lunar, near enough. Not the literal sixth of Earth — that hangs an astronaut up for the
+ * best part of four seconds, which stops reading as weightless and starts reading as a
+ * dropped frame — but far enough under it that a hop clears a habitat roof and comes back
+ * down slowly enough to watch. Apex is HOP_SPEED squared over 2·GRAVITY and the airtime is
+ * 2·HOP_SPEED / GRAVITY, so retune either and everything below follows from these two.
+ */
+const HOP_SPEED = 4.4
+const GRAVITY = 5
+/** How long one full hop lasts, so the jump clip can be stretched to cover the arc. */
+const HOP_AIRTIME = (2 * HOP_SPEED) / GRAVITY
+/**
+ * Acceleration while airborne, well under the figure on the ground. Full steering in a hop
+ * this long is a hover, and the point of low gravity is that leaving the ground commits you
+ * to the arc — this leaves you enough to lean a landing, not enough to change your mind
+ * halfway across it.
+ */
+const DRIVE_AIR_ACCEL = 4
 
 /**
  * The mannequin is authored 2.2 units tall. The colony wants a "little guy" silhouette at
@@ -507,6 +553,11 @@ export class Astronauts {
       eye: new THREE.Color(1, 1, 1),
       trim: new THREE.Color(0xffffff),
       hop: 0,
+      /** Vertical speed, only ever non-zero while somebody is hopping this one about. */
+      hopVel: 0,
+      /** Set while you are steering this astronaut; see `drive`. */
+      driven: false,
+      input: null,
       // Ground tracking. `groundAt` is the height last sampled and `groundY` the eased value
       // actually stood on; both start null so the first frame snaps instead of easing up.
       groundAt: null,
@@ -578,6 +629,13 @@ export class Astronauts {
       return
     }
     // A spawning agent keeps walking out of the ship; everyone else re-targets at once.
+    // One under a hand carries on walking where it is being walked — a poll landing
+    // mid-stride must not take the controls away — and keeps wearing the blue, which the
+    // status colours above have just written over.
+    if (agent.driven) {
+      this._driveLook(agent)
+      return
+    }
     if (agent.state !== 'spawning') agent.state = 'walking'
     agent.stateAge = 0
     agent.pathVersion = -1
@@ -585,6 +643,12 @@ export class Astronauts {
 
   _sendHome(agent) {
     if (agent.state === 'leaving' || agent.state === 'gone') return
+    // Archived, or gone from the scan. It has somewhere to be now, so you do not get to
+    // keep it — `onReleased` is what lets the page put the camera back.
+    if (agent.driven) {
+      this.release()
+      this.onReleased?.(agent.id)
+    }
     agent.state = 'leaving'
     agent.stateAge = 0
     agent.loop = null
@@ -718,6 +782,14 @@ export class Astronauts {
         break
       }
 
+      // Under a hand rather than under the simulation. Nothing here consults the site, the
+      // path or the status: the only thing steering this one is `agent.input`.
+      case 'driven': {
+        agent.scale = Math.min(1, agent.scale + dt * 3)
+        this._drive(agent, dt)
+        break
+      }
+
       case 'leaving': {
         agent.scale = Math.max(0, agent.scale - (dist < 1.4 ? dt * 2.2 : 0))
         this._walk(agent, toSite, dist, dt, 1.15)
@@ -800,6 +872,119 @@ export class Astronauts {
     if (Math.hypot(agent.vel.x, agent.vel.z) > 0.05) {
       agent.targetYaw = Math.atan2(agent.vel.x, agent.vel.z)
     }
+  }
+
+  /**
+   * One step of the astronaut you are steering.
+   *
+   * Deliberately not `_walk`. Three things are different, and all three are the difference
+   * between a character and a simulated one:
+   *
+   * - **No separation.** The crew is pushed apart by its neighbours, which is right for
+   *   agents with somewhere to be and wrong for one under a hand — a crowd would shove you
+   *   off the direction you are holding, and a control that argues with you is broken.
+   *   Everybody else still separates *from* you, so you can walk into a group and part it.
+   * - **No pathfinding.** You are the pathfinder.
+   * - **Off the edge of the grid is walkable.** The crew is kept inside the colony by the
+   *   grid's own bounds; you should be able to walk out onto the empty ground and look back
+   *   at the place, and there is nothing out there to collide with anyway.
+   */
+  _drive(agent, dt) {
+    const input = agent.input || { x: 0, z: 0, run: false }
+    const len = Math.hypot(input.x, input.z)
+    const want = len > 0.001 ? DRIVE_SPEED * (input.run ? DRIVE_RUN : 1) : 0
+
+    // Feet on the ground, the keys win instantly. Off it, they barely argue: horizontal
+    // speed is mostly whatever you left the ground with, which is what turns a running hop
+    // into a long low leap instead of a mid-air walk.
+    const airborne = agent.hopVel !== 0 || agent.hop > 0
+    const accel = airborne ? DRIVE_AIR_ACCEL : DRIVE_ACCEL
+    agent.vel.x = THREE.MathUtils.damp(agent.vel.x, len > 0.001 ? (input.x / len) * want : 0, accel, dt)
+    agent.vel.z = THREE.MathUtils.damp(agent.vel.z, len > 0.001 ? (input.z / len) * want : 0, accel, dt)
+
+    const dx = agent.vel.x * dt
+    const dz = agent.vel.z * dt
+    if (this.nav) {
+      if (!this.nav.slide(agent.pos, dx, dz, false)) agent.vel.multiplyScalar(0.35)
+    } else {
+      agent.pos.x += dx
+      agent.pos.z += dz
+    }
+
+    // A hop is a real arc rather than the fixed offset the crew's celebrate uses, because
+    // this one is held down and watched. It lands back on whatever ground is under it,
+    // which is what lets you hop up onto a deck.
+    if (airborne) {
+      agent.hopVel -= GRAVITY * dt
+      agent.hop += agent.hopVel * dt
+      if (agent.hop <= 0) {
+        agent.hop = 0
+        agent.hopVel = 0
+      }
+    }
+
+    if (Math.hypot(agent.vel.x, agent.vel.z) > 0.05) {
+      agent.targetYaw = Math.atan2(agent.vel.x, agent.vel.z)
+    }
+  }
+
+  /**
+   * Hand one astronaut over to the keyboard. Its own errands are suspended — it keeps its
+   * thread, its colour and its face, but nothing steers it until you let go.
+   */
+  drive(id) {
+    const agent = this.byId.get(id)
+    if (!agent || agent.state === 'gone' || agent.state === 'leaving') return null
+    this.release()
+    agent.driven = true
+    agent.input = { x: 0, z: 0, run: false }
+    agent.wasSuit = agent.suit
+    this._driveLook(agent)
+    agent.state = 'driven'
+    agent.stateAge = 0
+    agent.path = null
+    agent.hop = 0
+    agent.hopVel = 0
+    this.drivenId = id
+    return agent
+  }
+
+  /** Let go. The astronaut walks back to wherever its thread actually is. */
+  release() {
+    const agent = this.driven
+    this.drivenId = null
+    if (!agent) return null
+    agent.driven = false
+    agent.input = null
+    agent.hop = 0
+    agent.hopVel = 0
+    // Its own suit back, and its own status colours with it.
+    if (agent.wasSuit !== undefined) agent.suit = agent.wasSuit
+    agent.wasSuit = undefined
+    this._applyStatus(agent, agent.status)
+    // Back into the ordinary machine at the top: it re-routes from wherever you left it.
+    agent.state = agent.status === 'leaving' ? 'leaving' : 'walking'
+    agent.stateAge = 0
+    agent.pathVersion = -1
+    return agent
+  }
+
+  get driven() {
+    return this.drivenId ? this.byId.get(this.drivenId) || null : null
+  }
+
+  _driveLook(agent) {
+    agent.suit = DRIVE_LOOK.suit
+    agent.trim.set(DRIVE_LOOK.trim)
+    agent.eye.setRGB(...DRIVE_LOOK.eye)
+    agent.colorDirty = true
+  }
+
+  /** A hop, if this one is under a hand and has its feet on the ground. */
+  hop(id) {
+    const agent = this.byId.get(id)
+    if (!agent || !agent.driven || agent.hop > 0.001 || agent.hopVel !== 0) return
+    agent.hopVel = HOP_SPEED
   }
 
   /** Bucket every agent by a coarse cell, so separation only ever looks at real neighbours. */
@@ -1041,7 +1226,21 @@ export class Astronauts {
     const speed = agent.groundSpeed || 0
     let key
     if (agent.state === 'spawning') key = 'spawn'
-    else if (speed > 0.12) key = speed > WALK_SPEED * 1.25 ? 'run' : 'walk'
+    // Under a hand, the clip follows the hand. A thread that is asleep would otherwise have
+    // you sitting on the floor the moment you stopped walking, which is the simulation
+    // talking over the person holding the keys.
+    else if (agent.driven) {
+      // The threshold sits between the two paces rather than under both, or holding a
+      // direction would put it in the run clip at a walk and leave nothing for the sprint.
+      key =
+        agent.hop > 0.05 || agent.hopVel > 0
+          ? 'jump'
+          : speed > 0.12
+            ? speed > DRIVE_SPEED * 1.35
+              ? 'run'
+              : 'walk'
+            : 'idle'
+    } else if (speed > 0.12) key = speed > WALK_SPEED * 1.25 ? 'run' : 'walk'
     else {
       switch (agent.status) {
         case 'working':
@@ -1074,8 +1273,16 @@ export class Astronauts {
     const clip = rig.clips[key] || rig.clips.idle
     if (!clip) return
 
-    // Stride rate follows the ground, everything else runs at its authored speed.
-    const rate = key === 'walk' || key === 'run' ? THREE.MathUtils.clamp(speed / WALK_SPEED, 0.4, 2.1) : 1
+    // Stride rate follows the ground, everything else runs at its authored speed — except
+    // the jump, which is authored for a short Earth hop and holds its last frame once it
+    // runs out. Slowed to cover the airtime it stays a jump the whole way up and down,
+    // rather than striking the landing pose most of a second before landing.
+    const rate =
+      key === 'walk' || key === 'run'
+        ? THREE.MathUtils.clamp(speed / (agent.driven ? DRIVE_SPEED : WALK_SPEED), 0.4, 2.1)
+        : key === 'jump'
+          ? THREE.MathUtils.clamp(clip.duration / HOP_AIRTIME, 0.3, 1)
+          : 1
     agent.clipTime += dt * anim * rate
 
     if (key === 'sitDown' && agent.clipTime >= clip.duration) {

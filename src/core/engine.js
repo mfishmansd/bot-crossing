@@ -82,6 +82,15 @@ export class Engine {
     this.tiltShift = null
     /** How far the view is orbiting; the focal plane sits here. Fed by the frame loop. */
     this._focusDistance = 30
+    /**
+     * A multiplier on the tilt-shift, on top of whatever the settings ask for.
+     *
+     * The shallow focus is what makes the colony read as a model on a table, and that is
+     * exactly the effect you do *not* want from inside it: at walking height the plane of
+     * focus is a few metres out and everything past it is mush. Walk mode turns it down
+     * rather than off — off would be a visible cut, and some of it still helps.
+     */
+    this._focusScale = 1
 
     this.perf = new PerfMonitor()
     this._boundLoop = this._loop.bind(this)
@@ -160,7 +169,7 @@ export class Engine {
       if (this.smaaPass) this.smaaPass.enabled = s.get('antialias')
       if (this.tiltShift) {
         this.tiltShift.enabled = s.get('tiltShift')
-        this.tiltShift.setStrength(s.get('tiltShiftStrength'))
+        this.tiltShift.setStrength(s.get('tiltShiftStrength') * this._focusScale)
         this.tiltShift.setAngle(s.get('tiltShiftAngle'))
         this.tiltShift.setCamera(this.camera)
       }
@@ -203,7 +212,7 @@ export class Engine {
     // its depth texture is the clone that got written, not the one handed in above.
     // Deliberately not bound to a fixed target here — see `_syncDepthTexture`.
     this.tiltShift.enabled = this.settings.get('tiltShift')
-    this.tiltShift.setStrength(this.settings.get('tiltShiftStrength'))
+    this.tiltShift.setStrength(this.settings.get('tiltShiftStrength') * this._focusScale)
     this.tiltShift.setAngle(this.settings.get('tiltShiftAngle'))
     this.tiltShift.setCamera(this.camera)
     this.tiltShift.setFocusDistance(this._focusDistance)
@@ -276,6 +285,13 @@ export class Engine {
   setFocusDistance(distance) {
     this._focusDistance = distance
     this.tiltShift?.setFocusDistance(distance)
+  }
+
+  /** Scale the depth of field down (or back up) without touching what the settings say. */
+  setFocusScale(scale) {
+    if (scale === this._focusScale) return
+    this._focusScale = scale
+    this.tiltShift?.setStrength(this.settings.get('tiltShiftStrength') * scale)
   }
 
   _targetScale() {

@@ -7,8 +7,10 @@
  * `server/harnesses/README.md`.
  */
 import claudeCode from './claude-code.mjs'
+import cursor from './cursor.mjs'
+import gitRepos from './git-repos.mjs'
 
-export const HARNESSES = [claudeCode]
+export const HARNESSES = [claudeCode, cursor, gitRepos]
 
 export const harnessById = (id) => HARNESSES.find((h) => h.id === id) || null
 

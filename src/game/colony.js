@@ -46,6 +46,39 @@ const LIVE_GROWTH = 0.004
 /** How many zones' positions to remember, including repos with nothing running in them. */
 const LAYOUT_MEMORY = 80
 
+/** How high up the board sits, for measuring its distance to the camera. */
+const SIGN_EYE = 2.8
+/** Readable all the way in to `near`, gone by `far` — where two lines of small text stop being words. */
+const SIGN_FADE = { near: 46, far: 82 }
+/**
+ * How many signs may exist at once, and how far out one is kept before it is taken down.
+ *
+ * These are not tuning knobs, they are the reason the feature is affordable. Every sign owns
+ * a canvas texture of its own — the text is different on each, so there is nothing to share
+ * — and a projects directory can easily hold two hundred repos. Building one per zone would
+ * be three hundred megabytes of texture for a colony where all but a handful are, at the
+ * distance you are looking from, a grey smudge. So a sign is raised when its zone comes near
+ * and disposed when it leaves, nearest first, and the budget is what the eye can read at once.
+ */
+const MAX_SIGNS = 26
+const SIGN_KEEP = SIGN_FADE.far + 22
+/** How often the sweep runs. Signs appear as you approach, and half a second is not a wait. */
+const SIGN_SWEEP = 0.5
+/**
+ * How far apart two boards have to stand. A board turns to face the camera, so it sweeps a
+ * disc of its own width as you orbit; below about twice that, two of them intersect.
+ */
+const SIGN_APART = 5.6
+/**
+ * How far a board may turn off the direction its plot faces.
+ *
+ * It turns to the camera so it can be read, but not all the way round: past about this much
+ * it would be swinging back over its own plot, where the buildings are, and a board is wide
+ * enough to reach one. Stopping here also happens to be what a real sign does — walk behind
+ * it and you get the back of it, not a board that follows you.
+ */
+const SIGN_SWING = THREE.MathUtils.degToRad(74)
+
 export const STATUS_ORDER = ['blocked', 'waiting', 'working', 'celebrating', 'idle', 'sleeping']
 
 export const STATUS_LABEL = {
@@ -152,6 +185,8 @@ export class Colony {
     this.uiVisible = true
     this.hoveredPlot = null
     this.activePlots = new Set()
+    /** What each repo's README says it is, by project name. Kept across plot rebuilds. */
+    this.readmes = new Map()
     this._dustTint = new THREE.Color(this.planet.ground.high)
     this._c = new THREE.Color()
     this.stats = { agents: 0, projects: 0, working: 0, waiting: 0, blocked: 0, done: 0 }
@@ -362,12 +397,19 @@ export class Colony {
       this.plots.delete(name)
     }
 
+    // Every cell the whole colony holds, so a new plot can pick a corner for its sign that
+    // does not point straight at the neighbour's.
+    const occupied = new Set()
+    for (const cells of layout.values()) {
+      for (const cell of cells) occupied.add(`${cell.q},${cell.r}`)
+    }
+
     projects.forEach(([name], index) => {
       if (this.plots.has(name)) return
       const cells = layout.get(name)
       if (!cells?.length) return
       const accent = this._pickAccent(name)
-      const plot = new Plot({ id: name, name, index, cells, accent })
+      const plot = new Plot({ id: name, name, index, cells, accent, occupied })
       plot.signature = wanted.get(name)
       this.plots.set(name, plot)
       this.plotGroup.add(plot.group)
@@ -376,6 +418,15 @@ export class Colony {
       label.position.set(plot.labelAnchor.x, 3.2, plot.labelAnchor.z)
       plot.label = label
       this.labelGroup.add(label)
+
+      // Where its sign would stand, whether or not it ever gets one: the sweep needs the
+      // distance from the camera to a board that does not exist yet in order to decide
+      // whether to build it.
+      plot.signWorld = new THREE.Vector3(
+        plot.center.x + plot.signSpot.x,
+        DECK_TOP + SIGN_EYE,
+        plot.center.z + plot.signSpot.z
+      )
     })
 
     this.plotOrder = [...this.plots.values()]
@@ -482,6 +533,15 @@ export class Colony {
    * of buildings, which is exactly where the crew needs to walk.
    */
   _rebuildNavigation() {
+    // The grid has to cover the colony before anything is rasterised into it. A zone the
+    // grid does not reach is a zone whose every cell reads as blocked, and an astronaut that
+    // walked out to one spends the rest of the session shouldering an invisible wall.
+    let reach = 0
+    for (const plot of this.plotOrder) {
+      reach = Math.max(reach, Math.abs(plot.center.x) + plot.radius, Math.abs(plot.center.z) + plot.radius)
+    }
+    this.nav.resize(reach + 6)
+
     const obstacles = []
     for (const entry of this.buildings.values()) {
       if (entry.retiring) continue
@@ -621,6 +681,112 @@ export class Colony {
     }
   }
 
+  /**
+   * What a repo's README says it is. Handed in once the page has read one, and remembered
+   * by name so a zone that gets rebuilt onto new cells raises the same sign again.
+   *
+   * `null` takes the sign down, which is the honest answer for a folder that has no README:
+   * an empty board is worse than no board.
+   */
+  setReadme(name, summary) {
+    const next = summary && (summary.title || summary.tagline) ? summary : null
+    const had = this.readmes.has(name)
+    const before = this.readmes.get(name)
+    // `null` is stored rather than deleted, and it means "asked, and there is no readme" —
+    // which is the answer that stops the sweep asking again every half second.
+    this.readmes.set(name, next)
+    if (had && before?.title === next?.title && before?.tagline === next?.tagline) return
+    // Down, not up: the sweep decides whether this zone is near enough to be worth a board.
+    this.plots.get(name)?.clearSign()
+  }
+
+  /**
+   * Signs turn to face you, and fade out once they are too far away to read.
+   *
+   * The turn is the whole sign about its own post rather than the board about its mounting,
+   * which is why the post is a single central one — swinging a board on two legs reads as a
+   * glitch, swinging the pole it is bolted to does not read at all.
+   *
+   * The fade is not decoration. A board carrying two lines of 13px text is illegible past
+   * about seventy units and becomes a grey smudge on the horizon; taking it out there keeps
+   * the wide shot clean, and is what makes the sign worth having up close.
+   */
+  _updateSigns(dt) {
+    const show = this.uiVisible && this.settings.get('showSigns')
+    const eye = this.camera.position
+
+    this._signClock = (this._signClock || 0) + dt
+    if (this._signClock >= SIGN_SWEEP) {
+      this._signClock = 0
+      this._sweepSigns(eye, show)
+    }
+
+    for (const plot of this.plotOrder) {
+      const sign = plot.sign
+      if (!sign) continue
+      const board = sign.userData.board
+      const dist = plot.signWorld ? plot.signWorld.distanceTo(eye) : 0
+      const wanted = show ? THREE.MathUtils.smoothstep(SIGN_FADE.far - dist, 0, SIGN_FADE.far - SIGN_FADE.near) : 0
+      const next = THREE.MathUtils.damp(board.material.opacity, wanted, 8, dt)
+      board.material.opacity = next
+      sign.visible = next > 0.01
+      if (!sign.visible) continue
+      // Yaw only, and only so far: the sign stays planted, and a board that pitched with the
+      // camera would stop being an object in the world and start being a label again.
+      const base = Math.PI / 2 - plot.signSpot.angle
+      const want = Math.atan2(eye.x - plot.signWorld.x, eye.z - plot.signWorld.z)
+      // Shortest way round, so the clamp is against the real angle between them rather than
+      // against whichever multiple of 2π the two happened to land on.
+      const swing = Math.atan2(Math.sin(want - base), Math.cos(want - base))
+      sign.rotation.y = base + THREE.MathUtils.clamp(swing, -SIGN_SWING, SIGN_SWING)
+    }
+  }
+
+  /**
+   * Which zones get a board right now: the nearest `MAX_SIGNS` inside `SIGN_KEEP`, and no
+   * others. Everything else has its sign disposed, which is the only reason a colony of two
+   * hundred repos can have signs at all.
+   *
+   * This is also where a README is asked for. A zone nobody has been near has never had one
+   * read, and reading two hundred of them at boot to paint two hundred boards you cannot see
+   * is the same waste in a different currency.
+   */
+  _sweepSigns(eye, show) {
+    const near = []
+    for (const plot of this.plotOrder) {
+      if (!plot.signWorld) continue
+      const dist = plot.signWorld.distanceTo(eye)
+      if (dist > SIGN_KEEP || !show) {
+        plot.clearSign()
+        continue
+      }
+      near.push({ dist, plot })
+    }
+    if (!show) return
+
+    near.sort((a, b) => a.dist - b.dist)
+    const raised = []
+    for (let i = 0; i < near.length; i++) {
+      const plot = near[i].plot
+      // Nearest first, so when two zones want boards in the same spot the one you are
+      // standing over keeps its own. Corners are already chosen to face open ground; this
+      // is the backstop for a colony packed tightly enough that they cannot all be.
+      const crowded =
+        i >= MAX_SIGNS || raised.some((other) => other.signWorld.distanceToSquared(plot.signWorld) < SIGN_APART * SIGN_APART)
+      if (crowded) {
+        plot.clearSign()
+        continue
+      }
+      if (!this.readmes.has(plot.name)) {
+        this.onReadmeWanted?.(plot.name)
+        continue
+      }
+      const summary = this.readmes.get(plot.name)
+      if (summary && !plot.sign) plot.setSign(summary.title, summary.tagline)
+      if (plot.sign) raised.push(plot)
+    }
+  }
+
   /** Where the astronaut stands: just outside its building, facing in. */
   _workSite(plot, entry, index) {
     const b = entry.mesh.position
@@ -683,6 +849,7 @@ export class Colony {
     this._updatePlots(night, elapsed)
     this._updateScaffolds()
     this._updateLabels(dt)
+    this._updateSigns(dt)
   }
 
   _growBuildings(dt) {

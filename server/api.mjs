@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { readReadme } from './readme.mjs'
 import {
   defaultHarness,
   harnessAppStartedAt,
@@ -263,6 +264,15 @@ export async function apiMiddleware(req, res, next) {
 
     if (url.pathname === '/api/state' && req.method === 'PUT') {
       return send(res, 200, await writeState(await readJsonBody(req)))
+    }
+
+    // A GET, and folder-shaped like `/api/reveal` — but where that one *acts* on the folder
+    // this only reads out of it, so it takes its argument in the query string and stays
+    // cacheable-shaped, poll-friendly and safe to fire once per zone.
+    if (url.pathname === '/api/readme' && req.method === 'GET') {
+      const dir = await resolveFolder(url.searchParams.get('folder'))
+      if (!dir) return send(res, 400, { ok: false, error: 'That folder is not on this machine any more' })
+      return send(res, 200, await readReadme(dir))
     }
 
     if (url.pathname === '/api/open' && req.method === 'POST') {
