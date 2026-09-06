@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { PLANETS, createTerrain, createScatter, terrainHeight } from '../world/planet.js'
+import { PLANETS, createTerrain, createScatter, terrainHeight, setColonyFlatRadius } from '../world/planet.js'
 import { Sky } from '../world/sky.js'
 import {
   Plot,
@@ -41,6 +41,22 @@ import { Navigation } from '../agents/navigation.js'
 const STALE_MS = 3 * 24 * 60 * 60 * 1000
 /** How wide an astronaut is, for the purpose of not fitting through gaps it should not. */
 const AGENT_RADIUS = 0.26
+/**
+ * The same width, for the astronaut you are steering — deliberately much smaller.
+ *
+ * The crew is given room so a hundred of them routing past each other never look like they
+ * are scraping the walls. You are one astronaut, watched closely, and being stopped a
+ * third of a metre short of a doorway you can plainly see through is the single thing that
+ * makes a character feel like a physics object. Squeezing through is your problem to judge,
+ * not the grid's to forbid.
+ */
+const DRIVEN_RADIUS = 0.08
+/**
+ * How much of a building actually stops you, against how much stops the crew. The bounding
+ * radius over-covers anything that is not round, and the gaps between a ring of buildings
+ * are precisely where a person tries to walk.
+ */
+const DRIVEN_FOOTPRINT = 0.66
 /** Progress a live thread adds per second, so a working site visibly grows while you watch. */
 const LIVE_GROWTH = 0.004
 /** How many zones' positions to remember, including repos with nothing running in them. */
@@ -531,6 +547,10 @@ export class Colony {
    * astronaut's own width. The trim matters: the bounding radius already over-covers
    * anything that is not round, and blocking the full extent closes the gaps between a ring
    * of buildings, which is exactly where the crew needs to walk.
+   *
+   * Every obstacle gets an `r`, which is what stops the crew. Only the ones you could not
+   * plausibly walk over or squeeze past — buildings, the ship — also get an `rSolid`, the
+   * tighter radius that stops the astronaut you are steering.
    */
   _rebuildNavigation() {
     // The grid has to cover the colony before anything is rasterised into it. A zone the
@@ -542,17 +562,41 @@ export class Colony {
     }
     this.nav.resize(reach + 6)
 
+    // The ground has to be flat wherever the plots are. The hills used to ramp in from a
+    // fixed forty units regardless of how far the colony had spread, so the outer zones of
+    // a large one were laid into rising ground and disappeared beneath it. Same `reach` the
+    // grid is sized by, so the flat middle and the walkable area can never disagree.
+    // Guarded because the call graph closes a loop: rebuilding the terrain rebuilds the
+    // scatter, and new scatter rebuilds this grid. Growing the radius only once would make
+    // that terminate on its own, but relying on that is relying on an accident.
+    if (!this._fittingGround && setColonyFlatRadius(reach + 10)) {
+      this._fittingGround = true
+      try {
+        this._buildTerrain()
+      } finally {
+        this._fittingGround = false
+      }
+    }
+
     const obstacles = []
     for (const entry of this.buildings.values()) {
       if (entry.retiring) continue
       const p = entry.mesh.position
-      const r = (entry.mesh.userData.footprint || 1.2) * 0.8 + AGENT_RADIUS
-      obstacles.push({ x: p.x, z: p.z, r })
+      const footprint = entry.mesh.userData.footprint || 1.2
+      obstacles.push({
+        x: p.x,
+        z: p.z,
+        r: footprint * 0.8 + AGENT_RADIUS,
+        // A building is the one thing you genuinely cannot walk through, but it stops you
+        // at a tighter radius than it stops the crew.
+        rSolid: footprint * DRIVEN_FOOTPRINT + DRIVEN_RADIUS,
+      })
     }
     // Ground clutter counts too. A crate is only knee-high, but an astronaut walking
     // straight through one is exactly as wrong as one walking through a habitat.
     for (const plot of this.plotOrder) {
       for (const spot of plot.clutterSpots || []) {
+        // No `rSolid`: a crate is knee-high, and you step over it.
         obstacles.push({ x: plot.center.x + spot.x, z: plot.center.z + spot.z, r: spot.r + AGENT_RADIUS })
       }
     }
@@ -574,12 +618,13 @@ export class Colony {
         // sprig fences the corridors between zones — the crew walks the gaps between plots
         // to get anywhere, and scatter is placed in exactly those gaps.
         if (r < 0.55) continue
+        // No `rSolid` either — boulders and panels are yours to walk over.
         obstacles.push({ x: mat.elements[12], z: mat.elements[14], r: r + AGENT_RADIUS })
       }
     }
 
     const ship = shipPosition()
-    obstacles.push({ x: ship.x, z: ship.z, r: 3.4 + AGENT_RADIUS })
+    obstacles.push({ x: ship.x, z: ship.z, r: 3.4 + AGENT_RADIUS, rSolid: 3.4 + DRIVEN_RADIUS })
     this.nav.rebuild(obstacles)
   }
 

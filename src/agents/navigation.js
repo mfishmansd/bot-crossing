@@ -55,6 +55,12 @@ export class Navigation {
     const n = this.size * this.size
 
     this.blocked = new Uint8Array(n)
+    // The second map is the one the person at the keyboard walks on. It holds only what is
+    // genuinely impassable — buildings and the ship — at a tighter radius, so a crate is
+    // something you stride over and the gap between two habitats is something you fit
+    // through. The crew keeps `blocked`: an idler that wanders through a solar panel reads
+    // as a bug, while you doing it reads as you having legs.
+    this.solid = new Uint8Array(n)
     this.gScore = new Float32Array(n)
     this.parent = new Int32Array(n)
     this.stamp = new Int32Array(n) // which search last touched this node
@@ -106,11 +112,12 @@ export class Navigation {
    * somebody you are steering by hand, who should be able to walk off the end of the map
    * rather than hit a wall that is not there.
    */
-  isBlocked(x, z, outside = true) {
+  isBlocked(x, z, outside = true, solidOnly = false) {
     const ix = this.toCell(x)
     const iz = this.toCell(z)
     if (!this.inBounds(ix, iz)) return outside
-    return this.blocked[iz * this.size + ix] === 1
+    const map = solidOnly ? this.solid : this.blocked
+    return map[iz * this.size + ix] === 1
   }
 
   // ── building the map ────────────────────────────────────────────────────────────────
@@ -122,40 +129,49 @@ export class Navigation {
    */
   rebuild(obstacles) {
     this.blocked.fill(0)
+    this.solid.fill(0)
     const { size, cell } = this
 
     for (const o of obstacles) {
-      const r = o.r
-      if (!(r > 0)) continue
-      const minX = Math.max(0, this.toCell(o.x - r))
-      const maxX = Math.min(size - 1, this.toCell(o.x + r))
-      const minZ = Math.max(0, this.toCell(o.z - r))
-      const maxZ = Math.min(size - 1, this.toCell(o.z + r))
-      // Test against the cell's centre, so a cell is blocked when its middle is inside the
-      // obstacle rather than when it merely touches it — that is what keeps thin corridors.
-      const r2 = r * r
-      for (let iz = minZ; iz <= maxZ; iz++) {
-        const wz = this.toWorld(iz)
-        const dz = wz - o.z
-        const row = iz * size
-        for (let ix = minX; ix <= maxX; ix++) {
-          const dx = this.toWorld(ix) - o.x
-          if (dx * dx + dz * dz <= r2) this.blocked[row + ix] = 1
-        }
-      }
+      this._stamp(this.blocked, o.x, o.z, o.r)
+      // `rSolid` is what stops the person at the keyboard, and most obstacles do not set it
+      // at all — ground clutter and scatter are things you walk over rather than round.
+      this._stamp(this.solid, o.x, o.z, o.rSolid)
     }
     this.version++
     void cell
+  }
+
+  /** Paint one circle into one map. Shared by both passes of `rebuild`. */
+  _stamp(map, ox, oz, r) {
+    if (!(r > 0)) return
+    const size = this.size
+    const minX = Math.max(0, this.toCell(ox - r))
+    const maxX = Math.min(size - 1, this.toCell(ox + r))
+    const minZ = Math.max(0, this.toCell(oz - r))
+    const maxZ = Math.min(size - 1, this.toCell(oz + r))
+    // Test against the cell's centre, so a cell is blocked when its middle is inside the
+    // obstacle rather than when it merely touches it — that is what keeps thin corridors.
+    const r2 = r * r
+    for (let iz = minZ; iz <= maxZ; iz++) {
+      const dz = this.toWorld(iz) - oz
+      const row = iz * size
+      for (let ix = minX; ix <= maxX; ix++) {
+        const dx = this.toWorld(ix) - ox
+        if (dx * dx + dz * dz <= r2) map[row + ix] = 1
+      }
+    }
   }
 
   /**
    * The nearest walkable cell to a point, searched in expanding rings. Used both for a goal
    * that has been built over and for an agent that a new building landed on top of.
    */
-  nearestFree(x, z, maxRings = 24) {
+  nearestFree(x, z, maxRings = 24, solidOnly = false) {
+    const map = solidOnly ? this.solid : this.blocked
     const cx = this.toCell(x)
     const cz = this.toCell(z)
-    if (this.inBounds(cx, cz) && this.blocked[cz * this.size + cx] === 0) return { ix: cx, iz: cz }
+    if (this.inBounds(cx, cz) && map[cz * this.size + cx] === 0) return { ix: cx, iz: cz }
 
     for (let ring = 1; ring <= maxRings; ring++) {
       let best = null
@@ -167,7 +183,7 @@ export class Navigation {
           const ix = cx + dx
           const iz = cz + dz
           if (!this.inBounds(ix, iz)) continue
-          if (this.blocked[iz * this.size + ix] === 1) continue
+          if (map[iz * this.size + ix] === 1) continue
           const d = dx * dx + dz * dz
           if (d < bestD) {
             bestD = d
@@ -341,10 +357,10 @@ export class Navigation {
    * "never walks through a building" a property of the movement rather than a property of
    * the pathfinder having succeeded.
    */
-  slide(pos, dx, dz, outside = true) {
+  slide(pos, dx, dz, outside = true, solidOnly = false) {
     // An agent a building was dropped on top of has no legal move at all; walk it out.
-    if (this.isBlocked(pos.x, pos.z, outside)) {
-      const free = this.nearestFree(pos.x, pos.z)
+    if (this.isBlocked(pos.x, pos.z, outside, solidOnly)) {
+      const free = this.nearestFree(pos.x, pos.z, 24, solidOnly)
       if (free) {
         const fx = this.toWorld(free.ix)
         const fz = this.toWorld(free.iz)
@@ -358,16 +374,16 @@ export class Navigation {
 
     const nx = pos.x + dx
     const nz = pos.z + dz
-    if (!this.isBlocked(nx, nz, outside)) {
+    if (!this.isBlocked(nx, nz, outside, solidOnly)) {
       pos.x = nx
       pos.z = nz
       return true
     }
-    if (dx !== 0 && !this.isBlocked(nx, pos.z, outside)) {
+    if (dx !== 0 && !this.isBlocked(nx, pos.z, outside, solidOnly)) {
       pos.x = nx
       return true
     }
-    if (dz !== 0 && !this.isBlocked(pos.x, nz, outside)) {
+    if (dz !== 0 && !this.isBlocked(pos.x, nz, outside, solidOnly)) {
       pos.z = nz
       return true
     }

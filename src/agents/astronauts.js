@@ -39,7 +39,11 @@ const SUIT_TONES = [0xf3f1ec, 0xe8e4dc, 0xf7f4ee, 0xdfe4e8, 0xf1e9df]
  * Applied over the top of whatever the thread's status says, and put back the moment you
  * let go, so nothing about the colour is persisted anywhere.
  */
-const DRIVE_LOOK = { suit: 0x5f93de, trim: 0x4f7ec9, eye: [0.45, 1.5, 3.0] }
+/**
+ * The astronaut under your hand. `pack` is separate from `trim` because the trim colour is
+ * also what the chest lamp glows, and a lamp painted navy is a lamp that has gone out.
+ */
+const DRIVE_LOOK = { suit: 0x9fc7f2, trim: 0x4f7ec9, pack: 0x1b3566, eye: [0.45, 1.5, 3.0] }
 
 /** Trim + eye colour per behaviour. Eyes are pushed past 1.0 so the bloom pass catches them. */
 const AGENT_LOOK = {
@@ -552,6 +556,8 @@ export class Astronauts {
       suit: SUIT_TONES[(hash(entry.id) >>> 3) % SUIT_TONES.length],
       eye: new THREE.Color(1, 1, 1),
       trim: new THREE.Color(0xffffff),
+      /** Backpack colour. Follows `trim` for everybody but the astronaut you are driving. */
+      pack: new THREE.Color(0xffffff),
       hop: 0,
       /** Vertical speed, only ever non-zero while somebody is hopping this one about. */
       hopVel: 0,
@@ -620,6 +626,8 @@ export class Astronauts {
   _applyStatus(agent, status) {
     const look = AGENT_LOOK[status] || AGENT_LOOK.idle
     agent.trim.set(look.trim)
+    // Everybody else wears the trim colour on their pack; only the driven look parts them.
+    agent.pack.set(look.pack || look.trim)
     agent.eye.setRGB(look.eye[0], look.eye[1], look.eye[2])
     agent.loop = FACE_LOOPS[status] || null
     agent.colorDirty = true
@@ -905,7 +913,8 @@ export class Astronauts {
     const dx = agent.vel.x * dt
     const dz = agent.vel.z * dt
     if (this.nav) {
-      if (!this.nav.slide(agent.pos, dx, dz, false)) agent.vel.multiplyScalar(0.35)
+      // `solidOnly`: buildings and the ship stop you, ground clutter and scatter do not.
+      if (!this.nav.slide(agent.pos, dx, dz, false, true)) agent.vel.multiplyScalar(0.35)
     } else {
       agent.pos.x += dx
       agent.pos.z += dz
@@ -976,6 +985,7 @@ export class Astronauts {
   _driveLook(agent) {
     agent.suit = DRIVE_LOOK.suit
     agent.trim.set(DRIVE_LOOK.trim)
+    agent.pack.set(DRIVE_LOOK.pack)
     agent.eye.setRGB(...DRIVE_LOOK.eye)
     agent.colorDirty = true
   }
@@ -1364,7 +1374,7 @@ export class Astronauts {
         agent.colorDirty = false
         crew?.setColorAt(i, c.setHex(agent.suit))
         helmet.setColorAt(i, c.setHex(agent.suit))
-        pack.setColorAt(i, agent.trim)
+        pack.setColorAt(i, agent.pack)
         face.setColorAt(i, agent.eye)
         staticDirty = true
       }

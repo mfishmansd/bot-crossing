@@ -68,8 +68,47 @@ export const PLANETS = {
 }
 
 const GROUND_SIZE = 340
-/** Everything inside this radius is the buildable colony, and is kept nearly flat. */
+/**
+ * The smallest the flat, buildable middle is ever allowed to be.
+ *
+ * It used to be the whole story, and that was the bug: a colony of a hundred and seventy
+ * repos spirals its plots out past ninety units, while the hills ramped in from forty and
+ * craters landed from sixty. The outer zones were laid at their own height into ground that
+ * had risen several metres above them, so they read as missing — the hexagons were under
+ * the world rather than on it.
+ */
 export const COLONY_RADIUS = 46
+
+/**
+ * How far the flat middle actually reaches today. Grows to cover whatever the colony has
+ * spread to; never shrinks, because a plain that stays wide costs nothing and rebuilding
+ * the terrain does.
+ *
+ * Module level on purpose. The displaced mesh and the height samplers that put the ship,
+ * the plots and the scatter on top of it must agree to the millimetre — threading a
+ * parameter through five call sites is five chances for them to disagree, and the symptom
+ * of disagreeing is a colony that floats.
+ */
+let flatRadius = COLONY_RADIUS
+
+/** What the terrain is currently flat out to. */
+export function colonyFlatRadius() {
+  return flatRadius
+}
+
+/**
+ * Widen the flat middle to hold a colony of the given reach. Returns true when the value
+ * actually moved, which is the caller's cue that the terrain and everything sitting on it
+ * has to be rebuilt. Quantised, so a colony breathing by half a metre never triggers one.
+ */
+export function setColonyFlatRadius(reach) {
+  const want = Math.max(COLONY_RADIUS, Math.ceil(reach / 8) * 8)
+  if (want <= flatRadius) return false
+  flatRadius = want
+  // Craters are placed relative to the flat middle, so the cached samplers are now stale.
+  _samplers.clear()
+  return true
+}
 const DETAIL_SEGMENTS = { low: 72, medium: 128, high: 190 }
 
 /**
@@ -100,7 +139,7 @@ export function createTerrain(planet, detail, seed = 1337) {
 
     // Flat where the colony lives, then hills that ramp in over the next forty metres —
     // so nothing ever builds on a slope but the horizon still has shape to it.
-    const outside = THREE.MathUtils.smoothstep(dist, COLONY_RADIUS - 6, COLONY_RADIUS + 40)
+    const outside = THREE.MathUtils.smoothstep(dist, flatRadius - 6, flatRadius + 40)
     const gentle = fbm(noise, x * 0.035, z * 0.035, 3) * 0.5
     const hills = fbm(noise, x * 0.012, z * 0.012, 4) * 9 + fbm(noise, x * 0.05, z * 0.05, 2) * 1.4
     let y = gentle * planet.roughness * (1 - outside) + hills * outside * planet.roughness
@@ -123,7 +162,7 @@ export function createTerrain(planet, detail, seed = 1337) {
     c.lerp(tint, Math.max(0, speck) * 0.22)
     // Darken the far field hard so the eye settles on the colony and the hills read as a
     // silhouette rather than as more ground competing with the plots for attention.
-    c.multiplyScalar(1 - THREE.MathUtils.smoothstep(dist, COLONY_RADIUS * 0.7, GROUND_SIZE * 0.35) * 0.75)
+    c.multiplyScalar(1 - THREE.MathUtils.smoothstep(dist, flatRadius * 0.7, GROUND_SIZE * 0.35) * 0.75)
     colors[i * 3] = c.r
     colors[i * 3 + 1] = c.g
     colors[i * 3 + 2] = c.b
@@ -151,7 +190,7 @@ export function createTerrain(planet, detail, seed = 1337) {
 
 function sampleHeight(x, z, noise, craters, planet) {
   const dist = Math.hypot(x, z)
-  const outside = THREE.MathUtils.smoothstep(dist, COLONY_RADIUS - 6, COLONY_RADIUS + 40)
+  const outside = THREE.MathUtils.smoothstep(dist, flatRadius - 6, flatRadius + 40)
   const gentle = fbm(noise, x * 0.035, z * 0.035, 3) * 0.5
   const hills = fbm(noise, x * 0.012, z * 0.012, 4) * 9 + fbm(noise, x * 0.05, z * 0.05, 2) * 1.4
   let y = gentle * planet.roughness * (1 - outside) + hills * outside * planet.roughness
@@ -171,7 +210,7 @@ function makeCraters(count, seed) {
   const out = []
   for (let i = 0; i < count; i++) {
     const a = rand() * Math.PI * 2
-    const d = COLONY_RADIUS + 14 + rand() * 110
+    const d = flatRadius + 14 + rand() * 110
     const r = 4 + rand() * 16
     out.push({ x: Math.cos(a) * d, z: Math.sin(a) * d, r, depth: r * (0.18 + rand() * 0.16) })
   }
@@ -298,7 +337,7 @@ export function createScatter(planet, density, keepClear = [], seed = 4242) {
     if (slot >= mesh.instanceMatrix.count) continue
 
     // Far-field props are allowed to be much bigger, which reads as distance.
-    const far = THREE.MathUtils.smoothstep(d, COLONY_RADIUS, 130)
+    const far = THREE.MathUtils.smoothstep(d, flatRadius, 130)
     const [lo, hi] = kind.size
     const s = (lo + rand() * (hi - lo)) * (1 + far * 1.9)
 
