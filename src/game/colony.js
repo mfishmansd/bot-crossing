@@ -663,12 +663,19 @@ export class Colony {
    */
   syncDeck() {
     if (!this.aboard) return
-    const statuses = []
+    const entries = []
     for (const agent of this.astronauts.agents) {
       if (agent.state === 'gone' || agent.state === 'leaving') continue
-      statuses.push(agent.status)
+      const thread = agent.thread
+      entries.push({
+        id: agent.id,
+        project: thread?.project || '',
+        title: thread?.title || '',
+        harness: thread?.harnessName || thread?.harness || '',
+        status: agent.status,
+      })
     }
-    this.deck.sync(statuses)
+    this.deck.sync(entries)
   }
 
   /** The plot under a world point. On a hex lattice the nearest cell centre is the cell. */

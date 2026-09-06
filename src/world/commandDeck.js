@@ -52,50 +52,57 @@ const STATUS_COLOR = {
 const DARK = [0.06, 0.065, 0.085]
 
 /**
- * One texture shared by every panel, drawn once: ragged bars that read as lines of text at
- * any distance you can actually stand from a wall. Two hundred canvases of real text would
- * cost two hundred textures and still be illegible — what carries meaning here is the
- * colour and which panels are lit, and the bars are what stop a lit panel being a flat
- * rectangle.
+/**
+ * The wall's contents, as one texture.
+ *
+ * Two hundred panels showing two hundred different things could be two hundred canvases and
+ * two hundred draw calls, or it can be one atlas and one. It is the second, by exactly the
+ * trick the crew's sixteen faces already use: every panel samples the same texture and a
+ * per-instance offset picks which cell of it that panel reads. The mapping from panel to
+ * cell never changes, so the offsets are written once at build and only the pixels are ever
+ * redrawn.
  */
-function screenTexture() {
-  const canvas = document.createElement('canvas')
-  canvas.width = 128
-  canvas.height = 96
-  const c = canvas.getContext('2d')
-  c.fillStyle = '#000'
-  c.fillRect(0, 0, 128, 96)
+/**
+ * Cell size, and it is not a free choice: the ratio has to be the panel's own or every
+ * glyph on the wall is stretched, which in a monospace face is the first thing you notice.
+ * A panel is 1.301 by 0.828, so 192 by 122 is that ratio to within a thousandth. The
+ * absolute size is set by how far the texture is magnified in the room — a panel fills
+ * something like five hundred pixels when you are stood in front of it, so a cell half this
+ * size is a cell you can see the pixels of.
+ */
+const CELL_W = 192
+const CELL_H = 122
+const ATLAS_COLS = 16
+const ATLAS_ROWS = 13
 
-  // Seeded rather than random: two panels differing between reloads buys nothing, and a
-  // fixed scribble is one you can eyeball twice and compare.
-  let seed = 0x2f6b
-  const rand = () => {
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff
-    return seed / 0x7fffffff
-  }
+/** Fit a string to a width by cutting it and marking the cut, rather than letting it run on. */
+function ellipsize(c, text, max) {
+  if (c.measureText(text).width <= max) return text
+  let cut = text
+  while (cut.length > 1 && c.measureText(cut + '…').width > max) cut = cut.slice(0, -1)
+  return cut + '…'
+}
 
-  c.fillStyle = '#fff'
-  for (let y = 6; y < 92; y += 7) {
-    // An indent every few lines reads as structure rather than noise. The eye finds the
-    // shape of code in it, which is the entire trick.
-    const indent = 6 + Math.floor(rand() * 3) * 7
-    let x = indent
-    while (x < 120) {
-      const w = 4 + rand() * 22
-      if (x + w > 120) break
-      c.globalAlpha = 0.25 + rand() * 0.6
-      c.fillRect(x, y, w, 2.4)
-      x += w + 3 + rand() * 5
+/** Greedy wrap. Two lines is all a panel this size can hold and still be read at a glance. */
+function wrap(c, text, max, lines) {
+  const words = String(text || '').split(/\s+/).filter(Boolean)
+  const out = []
+  let line = ''
+  for (const word of words) {
+    const next = line ? line + ' ' + word : word
+    if (c.measureText(next).width <= max) {
+      line = next
+      continue
     }
+    if (line) out.push(line)
+    if (out.length === lines - 1) {
+      out.push(ellipsize(c, word + (words.indexOf(word) < words.length - 1 ? ' …' : ''), max))
+      return out
+    }
+    line = word
   }
-  c.globalAlpha = 1
-
-  const texture = new THREE.CanvasTexture(canvas)
-  texture.colorSpace = THREE.SRGBColorSpace
-  texture.minFilter = THREE.LinearMipmapLinearFilter
-  texture.magFilter = THREE.LinearFilter
-  texture.generateMipmaps = true
-  return texture
+  if (line && out.length < lines) out.push(ellipsize(c, line, max))
+  return out
 }
 
 export class CommandDeck {
@@ -200,8 +207,46 @@ export class CommandDeck {
     const panelW = ((2 * Math.PI * ROOM_R) / COLS) * 0.92
     const panelH = (WALL_H / ROWS) * 0.9
 
+    this.atlas = document.createElement('canvas')
+    this.atlas.width = CELL_W * ATLAS_COLS
+    this.atlas.height = CELL_H * ATLAS_ROWS
+    this.atlasCtx = this.atlas.getContext('2d')
+    this.atlasCtx.fillStyle = '#000'
+    this.atlasCtx.fillRect(0, 0, this.atlas.width, this.atlas.height)
+
+    const texture = new THREE.CanvasTexture(this.atlas)
+    texture.colorSpace = THREE.SRGBColorSpace
+    // No mipmaps, deliberately. A mip of an atlas averages across cell borders, so the
+    // bottom line of one panel bleeds into the top of its neighbour's — and the panels are
+    // never far enough away to have wanted a mip in the first place.
+    texture.minFilter = THREE.LinearFilter
+    texture.magFilter = THREE.LinearFilter
+    texture.generateMipmaps = false
+    texture.anisotropy = 4
+    this.atlasTexture = texture
+
     const geo = new THREE.PlaneGeometry(panelW, panelH)
-    const mat = new THREE.MeshBasicMaterial({ map: screenTexture(), toneMapped: false })
+    // Which cell each panel reads. Fixed for the life of the room: panel i is always cell i,
+    // so a thread moving between panels is a redraw and never a rewrite of this buffer.
+    const cells = new Float32Array(count * 2)
+    for (let i = 0; i < count; i++) {
+      cells[i * 2] = (i % ATLAS_COLS) / ATLAS_COLS
+      cells[i * 2 + 1] = 1 - (Math.floor(i / ATLAS_COLS) + 1) / ATLAS_ROWS
+    }
+    geo.setAttribute('aCell', new THREE.InstancedBufferAttribute(cells, 2))
+
+    const mat = new THREE.MeshBasicMaterial({ map: texture, toneMapped: false })
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uCellScale = { value: new THREE.Vector2(1 / ATLAS_COLS, 1 / ATLAS_ROWS) }
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+           attribute vec2 aCell;
+           uniform vec2 uCellScale;`
+        )
+        .replace('#include <uv_vertex>', `#include <uv_vertex>\n           vMapUv = uv * uCellScale + aCell;`)
+    }
     this.screens = new THREE.InstancedMesh(geo, mat, count)
     this.screens.frustumCulled = false
 
@@ -217,13 +262,93 @@ export class CommandDeck {
         this._m.compose(this._v, this._q, this._one)
         this.screens.setMatrixAt(i, this._m)
         this.screens.setColorAt(i, this._c.setRGB(DARK[0], DARK[1], DARK[2]))
-        // The golden-ratio stride is what keeps neighbours out of step later.
         this.panels.push({ base: DARK, phase: (i * 0.618) % 1, gain: 1 })
         i++
       }
     }
     this.screens.instanceMatrix.needsUpdate = true
     this.group.add(this.screens)
+    this._drawAll([])
+  }
+
+  /**
+   * Draw one panel's worth of the atlas.
+   *
+   * White on black throughout, because the per-instance colour multiplies whatever is here
+   * — the panel is tinted by what its thread is doing, so drawing this in colour would mean
+   * mixing two colours to say one thing. Brightness carries the hierarchy instead, the way
+   * a monochrome terminal always did.
+   */
+  _drawCell(index, entry) {
+    const c = this.atlasCtx
+    const x = (index % ATLAS_COLS) * CELL_W
+    const y = Math.floor(index / ATLAS_COLS) * CELL_H
+    c.save()
+    c.translate(x, y)
+    c.beginPath()
+    c.rect(0, 0, CELL_W, CELL_H)
+    c.clip()
+
+    c.fillStyle = '#000'
+    c.fillRect(0, 0, CELL_W, CELL_H)
+
+    if (!entry) {
+      // A dark panel is a panel with no thread behind it. It gets the faintest of grids so
+      // that it still reads as a screen that is switched off rather than a hole in the wall.
+      c.strokeStyle = 'rgba(255,255,255,0.05)'
+      c.lineWidth = 1
+      for (let gy = 16; gy < CELL_H; gy += 20) {
+        c.beginPath()
+        c.moveTo(8, gy)
+        c.lineTo(CELL_W - 8, gy)
+        c.stroke()
+      }
+      c.restore()
+      return
+    }
+
+    const pad = 12
+    const width = CELL_W - pad * 2
+
+    // The project, loudest: it is what the zone outside is called, and the thing you are
+    // most likely to be scanning the wall for.
+    c.font = 'bold 19px ui-monospace, SFMono-Regular, Menlo, monospace'
+    c.fillStyle = 'rgba(255,255,255,0.96)'
+    c.fillText(ellipsize(c, entry.project || '—', width), pad, 25)
+
+    c.strokeStyle = 'rgba(255,255,255,0.22)'
+    c.lineWidth = 1
+    c.beginPath()
+    c.moveTo(pad, 34.5)
+    c.lineTo(CELL_W - pad, 34.5)
+    c.stroke()
+
+    c.font = '15px ui-monospace, SFMono-Regular, Menlo, monospace'
+    c.fillStyle = 'rgba(255,255,255,0.72)'
+    const lines = wrap(c, entry.title, width, 3)
+    for (let k = 0; k < lines.length; k++) c.fillText(lines[k], pad, 54 + k * 18)
+
+    // The status word, and the harness it belongs to. Bottom of the panel, quietest. The
+    // two share the line, so the split between them is what decides whether "Claude Code"
+    // survives or becomes "Claude …" — it is measured rather than guessed.
+    c.font = 'bold 14px ui-monospace, SFMono-Regular, Menlo, monospace'
+    c.fillStyle = 'rgba(255,255,255,0.9)'
+    const status = (entry.status || '').toUpperCase()
+    const statusW = c.measureText(status).width
+    c.fillText(ellipsize(c, status, width * 0.55), pad, CELL_H - 12)
+    if (entry.harness) {
+      c.font = '13px ui-monospace, SFMono-Regular, Menlo, monospace'
+      c.fillStyle = 'rgba(255,255,255,0.45)'
+      const label = ellipsize(c, entry.harness, width - statusW - 10)
+      c.fillText(label, CELL_W - pad - c.measureText(label).width, CELL_H - 12)
+    }
+    c.restore()
+  }
+
+  /** Redraw every cell. Only ever called when what the wall is showing actually changed. */
+  _drawAll(entries) {
+    for (let i = 0; i < this.panels.length; i++) this._drawCell(i, entries[i])
+    this.atlasTexture.needsUpdate = true
   }
 
   /** A plinth to walk around, and two dim fills so the floor is not a hole. */
@@ -260,13 +385,21 @@ export class CommandDeck {
    * with fewer threads than panels leaves the rest dark rather than repeating itself — a
    * wall looping the same six threads twenty times looks busy and says nothing.
    */
-  sync(statuses) {
+  sync(entries) {
     const panels = this.panels
+    // Redrawing two hundred cells of text is cheap next to a poll and ruinous next to a
+    // frame, so it happens only when the wall is actually showing something else. Colour
+    // still follows every sync: a thread changing what it is doing is a tint, not a redraw.
+    const signature = entries.map((e) => (e ? e.id + '\u0000' + e.title : '')).join('\u0001')
+    if (signature !== this._signature) {
+      this._signature = signature
+      this._drawAll(entries)
+    }
     for (let i = 0; i < panels.length; i++) {
-      const status = statuses[i]
+      const status = entries[i] && entries[i].status
       panels[i].base = (status && STATUS_COLOR[status]) || DARK
-      // A panel that has just been handed a thread flares, so the wall visibly reacts to a
-      // scan landing instead of quietly becoming a different wall.
+      // A panel just handed a thread flares, so the wall visibly reacts to a scan landing
+      // instead of quietly becoming a different wall.
       if (status) panels[i].gain = 2.2
     }
   }
