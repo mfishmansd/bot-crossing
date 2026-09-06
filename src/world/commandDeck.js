@@ -75,7 +75,6 @@ const STATUS_COLOR = {
 const DARK = [0.05, 0.055, 0.075]
 
 /**
-/**
  * The wall's contents, as one texture.
  *
  * Two hundred panels showing two hundred different things could be two hundred canvases and
@@ -150,6 +149,8 @@ export class CommandDeck {
     this._byPanel = []
     /** The panel in the middle of the view, or -1. Drawn brighter; see `setFocused`. */
     this.focused = -1
+    /** Which repo the console is showing, or null when it is showing nothing. */
+    this.consoleName = null
 
     this._buildShell()
     this._buildScreens()
@@ -424,6 +425,8 @@ export class CommandDeck {
     top.position.y = 0.64
     this.group.add(top)
 
+    this._buildConsole()
+
     // Unlit screens throw no light of their own, so these stand in for the bounce.
     const fill = new THREE.PointLight(0x74b8dc, 6, 26, 2)
     fill.position.set(0, 2.4, 0)
@@ -468,8 +471,13 @@ export class CommandDeck {
     }
   }
 
-  update(dt, elapsed) {
+  update(dt, elapsed, cameraPos) {
     if (!this.group.visible) return
+    if (cameraPos && this.console.visible) {
+      // Yaw only. Pitching to face a camera that is above you tips the screen back like a
+      // tray, and a screen that leans is one that looks like it is about to fall over.
+      this.console.rotation.y = Math.atan2(cameraPos.x - ORIGIN.x, cameraPos.z - ORIGIN.z)
+    }
     const panels = this.panels
     const c = this._c
     for (let i = 0; i < panels.length; i++) {
@@ -486,6 +494,154 @@ export class CommandDeck {
       this.screens.setColorAt(i, c)
     }
     this.screens.instanceColor.needsUpdate = true
+  }
+
+  /**
+   * The console: one screen floating over the plinth, showing the repo you are facing.
+   *
+   * The wall says what every repo is doing; this says what one of them *is* — its readme's
+   * own title and first sentence, the same answer `R` gives on the map — and lists its
+   * threads worst first, which is the queue Enter works through. It turns to face you, yaw
+   * only, exactly like the boards on the surface: a screen you can read from anywhere in the
+   * room without it ever appearing to move.
+   */
+  _buildConsole() {
+    this.consoleCanvas = document.createElement('canvas')
+    this.consoleCanvas.width = 640
+    this.consoleCanvas.height = 400
+    this.consoleCtx = this.consoleCanvas.getContext('2d')
+
+    const texture = new THREE.CanvasTexture(this.consoleCanvas)
+    texture.colorSpace = THREE.SRGBColorSpace
+    texture.minFilter = THREE.LinearFilter
+    texture.magFilter = THREE.LinearFilter
+    texture.generateMipmaps = false
+    texture.anisotropy = 4
+    this.consoleTexture = texture
+
+    // 2.56 by 1.6: the canvas's own ratio, for the same reason the wall's cells match the
+    // wall's panels. Sat just above head height so it never hides the astronaut from you.
+    const geo = new THREE.PlaneGeometry(2.56, 1.6)
+    const mat = new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, transparent: true, opacity: 0.94 })
+    this.console = new THREE.Mesh(geo, mat)
+    this.console.position.set(0, 2.15, 0)
+    this.console.visible = false
+    this.group.add(this.console)
+
+    // A thin stem from the plinth, so the screen reads as mounted rather than floating.
+    const stem = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.03, 0.03, 0.7, 6),
+      new THREE.MeshBasicMaterial({ color: 0x3f9ec4, toneMapped: false })
+    )
+    stem.position.set(0, 0.99, 0)
+    this.group.add(stem)
+
+    this._drawConsole(null)
+  }
+
+  /**
+   * Show a repo on the console, or nothing. `info` is assembled by the colony, which owns
+   * both the readme cache and the threads; the deck only knows how to draw it. Redrawn only
+   * when what it says has changed, for the same reason as the wall.
+   */
+  setConsole(info) {
+    const signature = info
+      ? [info.project, info.title, info.tagline, info.readmeState, ...info.threads.map((t) => t.status + t.title)].join('\u0000')
+      : ''
+    this.consoleName = info ? info.project : null
+    this.console.visible = Boolean(info)
+    if (signature === this._consoleSignature) return
+    this._consoleSignature = signature
+    this._drawConsole(info)
+  }
+
+  _drawConsole(info) {
+    const c = this.consoleCtx
+    const W = this.consoleCanvas.width
+    const H = this.consoleCanvas.height
+    c.clearRect(0, 0, W, H)
+    c.fillStyle = 'rgba(4,7,12,0.96)'
+    c.fillRect(0, 0, W, H)
+    c.strokeStyle = 'rgba(63,158,196,0.9)'
+    c.lineWidth = 3
+    c.strokeRect(1.5, 1.5, W - 3, H - 3)
+    if (!info) {
+      this.consoleTexture.needsUpdate = true
+      return
+    }
+
+    const pad = 26
+    const width = W - pad * 2
+    let y = 52
+
+    // The repo, then what its readme calls it if that is a different thing. Most of the
+    // time they agree and the second line is skipped rather than said twice.
+    c.font = 'bold 34px ui-monospace, SFMono-Regular, Menlo, monospace'
+    c.fillStyle = 'rgba(255,255,255,0.97)'
+    c.fillText(ellipsize(c, info.project, width), pad, y)
+    y += 14
+
+    c.strokeStyle = 'rgba(63,158,196,0.55)'
+    c.lineWidth = 2
+    c.beginPath()
+    c.moveTo(pad, y)
+    c.lineTo(W - pad, y)
+    c.stroke()
+    y += 34
+
+    c.font = '20px ui-monospace, SFMono-Regular, Menlo, monospace'
+    if (info.readmeState === 'loading') {
+      c.fillStyle = 'rgba(255,255,255,0.4)'
+      c.fillText('reading the readme…', pad, y)
+      y += 30
+    } else if (!info.title && !info.tagline) {
+      c.fillStyle = 'rgba(255,255,255,0.4)'
+      c.fillText('no readme', pad, y)
+      y += 30
+    } else {
+      if (info.title && info.title.toLowerCase() !== info.project.toLowerCase()) {
+        c.fillStyle = 'rgba(159,199,242,0.95)'
+        c.fillText(ellipsize(c, info.title, width), pad, y)
+        y += 28
+      }
+      if (info.tagline) {
+        c.fillStyle = 'rgba(255,255,255,0.78)'
+        for (const line of wrap(c, info.tagline, width, 3)) {
+          c.fillText(line, pad, y)
+          y += 26
+        }
+      }
+    }
+    y += 12
+
+    // The queue: this repo's threads, worst first, however many fit. The status word is
+    // the wall's colour for the same state, so the two read as one system.
+    c.font = 'bold 17px ui-monospace, SFMono-Regular, Menlo, monospace'
+    c.fillStyle = 'rgba(255,255,255,0.5)'
+    const total = info.threads.length === 1 ? '1 thread' : info.threads.length + ' threads'
+    c.fillText(total.toUpperCase(), pad, y)
+    y += 26
+    const rowH = 27
+    const room = Math.max(0, Math.floor((H - 22 - y) / rowH))
+    const shown = info.threads.slice(0, room)
+    for (const t of shown) {
+      const col = STATUS_COLOR[t.status] || STATUS_COLOR.idle
+      c.font = 'bold 16px ui-monospace, SFMono-Regular, Menlo, monospace'
+      c.fillStyle = `rgb(${col[0] * 255 | 0},${col[1] * 255 | 0},${col[2] * 255 | 0})`
+      const word = t.status.toUpperCase()
+      c.fillText(word, pad, y)
+      const wordW = 118
+      c.font = '17px ui-monospace, SFMono-Regular, Menlo, monospace'
+      c.fillStyle = 'rgba(255,255,255,0.85)'
+      c.fillText(ellipsize(c, t.title || '(untitled)', width - wordW), pad + wordW, y)
+      y += rowH
+    }
+    if (info.threads.length > shown.length) {
+      c.font = '15px ui-monospace, SFMono-Regular, Menlo, monospace'
+      c.fillStyle = 'rgba(255,255,255,0.4)'
+      c.fillText(`… and ${info.threads.length - shown.length} more`, pad, y)
+    }
+    this.consoleTexture.needsUpdate = true
   }
 
   /** What a panel is showing, or null for a dark one. */

@@ -602,6 +602,10 @@ function updateDeckFacing() {
   const entry = colony.deck.entryAt(panel)
   if (!entry) return
   selectProject(entry.project)
+  // The console follows the facing repo. Asking for its readme goes through the same
+  // loader the surface boards use, so a repo you have already stood near costs nothing.
+  readmeFor(pathForProject(entry.project), entry.project)
+  colony.deck.setConsole(colony.consoleFor(entry.project))
   hud.hint(`${entry.project} · Enter opens · C new thread · A archives · N next needing you · E leave`)
 }
 

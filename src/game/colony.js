@@ -651,6 +651,7 @@ export class Colony {
   leaveShip() {
     if (!this.aboard) return null
     this.aboard = false
+    this.deck.setConsole(null)
     this.deck.setAboard(false)
     const door = this.ship.shipDoor()
     return this.astronauts.leaveInterior(door)
@@ -716,6 +717,31 @@ export class Colony {
       })
     }
     this.deck.sync(rows)
+  }
+
+  /**
+   * Everything the console says about one repo, in one object. Assembled here because the
+   * colony is the only thing that holds both halves — the readme cache, and the threads.
+   * `readmes` has three states worth telling apart: never asked (undefined), asked and
+   * there is none (null), and an answer.
+   */
+  consoleFor(name) {
+    const now = Date.now()
+    const summary = this.readmes.get(name)
+    const threads = []
+    for (const thread of this.threads.values()) {
+      if ((thread.project || 'unknown') !== name) continue
+      threads.push({ title: thread.title || '', status: statusFor(thread, now) })
+    }
+    // Worst first, exactly the order Enter works through them.
+    threads.sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status))
+    return {
+      project: name,
+      title: summary?.title || '',
+      tagline: summary?.tagline || '',
+      readmeState: summary === undefined ? 'loading' : summary === null ? 'none' : 'ready',
+      threads,
+    }
   }
 
   /** The plot under a world point. On a hex lattice the nearest cell centre is the cell. */
@@ -830,6 +856,8 @@ export class Colony {
     // `null` is stored rather than deleted, and it means "asked, and there is no readme" —
     // which is the answer that stops the sweep asking again every half second.
     this.readmes.set(name, next)
+    // The console may be waiting on exactly this answer.
+    if (this.aboard && this.deck.consoleName === name) this.deck.setConsole(this.consoleFor(name))
     if (had && before?.title === next?.title && before?.tagline === next?.tagline) return
     // Down, not up: the sweep decides whether this zone is near enough to be worth a board.
     this.plots.get(name)?.clearSign()
@@ -973,7 +1001,7 @@ export class Colony {
     // One write turns every rotor in the colony.
     buildingUniforms.uTime.value = elapsed
     this.ship.update(dt, elapsed, night)
-    this.deck.update(dt, elapsed)
+    this.deck.update(dt, elapsed, this.camera.position)
     // Re-dealt a few times a second rather than every frame. A thread changes what it is
     // doing on the timescale of a poll, and rebuilding the wall at sixty hertz would be two
     // hundred writes a frame to say the same thing it said on the last one.
@@ -982,6 +1010,7 @@ export class Colony {
       if (this._deckAge > 0.75) {
         this._deckAge = 0
         this.syncDeck()
+        if (this.deck.consoleName) this.deck.setConsole(this.consoleFor(this.deck.consoleName))
       }
     }
 
