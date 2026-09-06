@@ -590,9 +590,10 @@ function toggleAboard() {
   if (!aboard) return
   rig.setInterior(colony.deck.cameraBounds())
   rig.snapTo(aboard.pos)
-  // The deck is a room, not a landscape: the shallow focus that makes the colony read as a
-  // model on a table has nothing to do here but blur the far wall.
-  engine.setFocusScale(1)
+  // Nearly off. The shallow focus is what makes the colony read as a model on a table, and
+  // indoors it has nothing left to do but blur the wall you came in to read — this was set
+  // to full strength, which made the one place with text in it the blurriest in the game.
+  engine.setFocusScale(0.08)
   atHatch = false
   hud.hint('The command deck · every panel is a thread · E to step back outside')
 }
@@ -617,7 +618,11 @@ function driveInput() {
 
   // Aimed at the chest rather than the boots, so the astronaut sits in the middle of the
   // frame with the colony around it instead of at the bottom edge looking at the floor.
-  walkAim.set(agent.pos.x, agent.pos.y + 0.9, agent.pos.z)
+  // Aimed higher indoors than out. The camera orbits whatever it is aimed at, so the aim
+  // point is also the pivot you tip around — keeping it at chest height would mean the
+  // camera had to drop to the floor to look up at all, and the top row is nearly six units
+  // above that floor.
+  walkAim.set(agent.pos.x, agent.pos.y + (colony.aboard ? 1.75 : 0.9), agent.pos.z)
   rig.follow(walkAim)
 }
 

@@ -20,10 +20,15 @@ import * as THREE from 'three'
 /** Far enough under the colony that nothing up there shows through a seam. */
 const ORIGIN = new THREE.Vector3(0, -600, 0)
 
-const ROOM_R = 9
-const WALL_H = 4.6
+const ROOM_R = 10.5
+const WALL_H = 5.8
 const ROWS = 5
-const COLS = 40
+/**
+ * Thirty-six around rather than forty, on a wider wall: 180 panels, still comfortably more
+ * than the repos there are to put on them, and each one thirty per cent wider and a quarter
+ * taller than before. Panel count was never the constraint — legibility was.
+ */
+const COLS = 36
 /**
  * How close to the wall you may walk.
  *
@@ -40,11 +45,11 @@ const WALK_R = ROOM_R - 2.2
  *
  * Panels are built from the floor up, and the colony hands its repos over busiest first, so
  * left alone the wall puts the repo you care most about at knee height and a repo with one
- * sleeping thread at eye level. The rows sit at 1.01, 1.93, 2.85, 3.77 and 4.69; you stand
+ * sleeping thread at eye level. The rows sit at 1.13, 2.29, 3.45, 4.61 and 5.77; you stand
  * with your eye near two. So it is filled from there outwards, and the quiet tail ends up
  * where a quiet tail belongs — overhead and underfoot.
  */
-const ROW_FILL = [1, 2, 0, 3, 4]
+const ROW_FILL = [1, 0, 2, 3, 4]
 
 /**
  * Panel colour by thread status. Deliberately the astronauts' own trim palette rather than
@@ -83,15 +88,15 @@ const DARK = [0.05, 0.055, 0.075]
 /**
  * Cell size, and it is not a free choice: the ratio has to be the panel's own or every
  * glyph on the wall is stretched, which in a monospace face is the first thing you notice.
- * A panel is 1.301 by 0.828, so 192 by 122 is that ratio to within a thousandth. The
+ * A panel is 1.686 by 1.044, so 242 by 150 is that ratio to within two thousandths. The
  * absolute size is set by how far the texture is magnified in the room — a panel fills
  * something like five hundred pixels when you are stood in front of it, so a cell half this
  * size is a cell you can see the pixels of.
  */
-const CELL_W = 192
-const CELL_H = 122
-const ATLAS_COLS = 16
-const ATLAS_ROWS = 13
+const CELL_W = 242
+const CELL_H = 150
+const ATLAS_COLS = 15
+const ATLAS_ROWS = 12
 
 /** Fit a string to a width by cutting it and marking the cut, rather than letting it run on. */
 function ellipsize(c, text, max) {
@@ -171,6 +176,9 @@ export class CommandDeck {
       z: ORIGIN.z,
       r: ROOM_R - 0.45,
       ceiling: ORIGIN.y + WALL_H + 0.9 - 0.35,
+      // Looking up drops the camera below what it is aiming at, so the deck plate is a wall
+      // like any other — without this, tipping far enough back puts you under the floor.
+      floor: ORIGIN.y + 0.3,
     }
   }
 
@@ -323,7 +331,7 @@ export class CommandDeck {
       // that it still reads as a screen that is switched off rather than a hole in the wall.
       c.strokeStyle = 'rgba(255,255,255,0.05)'
       c.lineWidth = 1
-      for (let gy = 16; gy < CELL_H; gy += 20) {
+      for (let gy = 20; gy < CELL_H; gy += 25) {
         c.beginPath()
         c.moveTo(8, gy)
         c.lineTo(CELL_W - 8, gy)
@@ -333,20 +341,20 @@ export class CommandDeck {
       return
     }
 
-    const pad = 12
+    const pad = 15
     const width = CELL_W - pad * 2
 
     // The repo, loudest: it is what the zone outside is called, what the sidebar lists, and
     // what you are scanning the wall for.
-    c.font = 'bold 19px ui-monospace, SFMono-Regular, Menlo, monospace'
+    c.font = 'bold 24px ui-monospace, SFMono-Regular, Menlo, monospace'
     c.fillStyle = 'rgba(255,255,255,0.96)'
-    c.fillText(ellipsize(c, entry.project || '—', width), pad, 25)
+    c.fillText(ellipsize(c, entry.project || '—', width), pad, 31)
 
     c.strokeStyle = 'rgba(255,255,255,0.22)'
-    c.lineWidth = 1
+    c.lineWidth = 1.4
     c.beginPath()
-    c.moveTo(pad, 34.5)
-    c.lineTo(CELL_W - pad, 34.5)
+    c.moveTo(pad, 42.5)
+    c.lineTo(CELL_W - pad, 42.5)
     c.stroke()
 
     // The count, then only the states worth naming. A repo where nothing is wrong says so
@@ -357,35 +365,35 @@ export class CommandDeck {
     if (counts.blocked) notable.push(counts.blocked + ' stuck')
     if (counts.waiting) notable.push(counts.waiting + ' need you')
     if (counts.working) notable.push(counts.working + ' running')
-    c.font = '15px ui-monospace, SFMono-Regular, Menlo, monospace'
+    c.font = '19px ui-monospace, SFMono-Regular, Menlo, monospace'
     c.fillStyle = 'rgba(255,255,255,0.82)'
     const total = entry.total === 1 ? '1 thread' : entry.total + ' threads'
-    c.fillText(ellipsize(c, total, width), pad, 54)
+    c.fillText(ellipsize(c, total, width), pad, 66)
     if (notable.length) {
       c.fillStyle = 'rgba(255,255,255,0.66)'
-      c.fillText(ellipsize(c, notable.join(' · '), width), pad, 72)
+      c.fillText(ellipsize(c, notable.join(' · '), width), pad, 89)
     }
 
     // And the worst thread's own words, if there is room left for them — one line, because
     // this is the reason the repo is lit rather than the whole of what it is doing.
     if (entry.title) {
-      c.font = '13px ui-monospace, SFMono-Regular, Menlo, monospace'
+      c.font = '16px ui-monospace, SFMono-Regular, Menlo, monospace'
       c.fillStyle = 'rgba(255,255,255,0.44)'
-      c.fillText(ellipsize(c, entry.title, width), pad, notable.length ? 90 : 76)
+      c.fillText(ellipsize(c, entry.title, width), pad, notable.length ? 112 : 94)
     }
 
     // The status word, and the harness. The split between them is measured rather than
     // guessed, or a long harness name loses its tail to make room for nothing.
-    c.font = 'bold 14px ui-monospace, SFMono-Regular, Menlo, monospace'
+    c.font = 'bold 17px ui-monospace, SFMono-Regular, Menlo, monospace'
     c.fillStyle = 'rgba(255,255,255,0.9)'
     const status = (entry.status || '').toUpperCase()
     const statusW = c.measureText(status).width
-    c.fillText(ellipsize(c, status, width * 0.55), pad, CELL_H - 12)
+    c.fillText(ellipsize(c, status, width * 0.55), pad, CELL_H - 15)
     if (entry.harness) {
-      c.font = '13px ui-monospace, SFMono-Regular, Menlo, monospace'
+      c.font = '16px ui-monospace, SFMono-Regular, Menlo, monospace'
       c.fillStyle = 'rgba(255,255,255,0.45)'
-      const label = ellipsize(c, entry.harness, width - statusW - 10)
-      c.fillText(label, CELL_W - pad - c.measureText(label).width, CELL_H - 12)
+      const label = ellipsize(c, entry.harness, width - statusW - 12)
+      c.fillText(label, CELL_W - pad - c.measureText(label).width, CELL_H - 15)
     }
     c.restore()
   }

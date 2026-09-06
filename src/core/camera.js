@@ -19,7 +19,16 @@ const WALK_DIST = { min: 4, max: 30, rest: 9 }
  */
 const INTERIOR_DIST = { min: 1.8, max: 6.4, rest: 3.6 }
 /** Nearly level. A room is looked across; only a landscape is looked down on. */
-const INTERIOR_POLAR = THREE.MathUtils.degToRad(80)
+const INTERIOR_POLAR = THREE.MathUtils.degToRad(84)
+/**
+ * How far back you may tip indoors. The map's limit is 84°, which is level with what you
+ * are looking at and exactly as far as a camera over a landscape ever needs — there is
+ * nothing above a landscape. A room has five rows of wall going up to nearly six units, and
+ * you cannot read the top two without looking up at them. Past 90° the camera is below its
+ * target and rising to meet it, which is what looking up is; the deck plate in the room's
+ * bounds is what stops that going through the floor.
+ */
+const INTERIOR_POLAR_MAX = THREE.MathUtils.degToRad(124)
 /** Nearer the horizon than the map's isometric rest: walking, you want to see ahead. */
 const WALK_POLAR = THREE.MathUtils.degToRad(68)
 const WORLD_LIMIT = 82
@@ -207,7 +216,8 @@ export class CameraRig {
       e.preventDefault()
       this.desiredAzimuth -= dx * 0.006
       // Mouse up tilts toward the horizon, mouse down returns to overhead — Earth's sense.
-      this.desiredPolar = THREE.MathUtils.clamp(this.desiredPolar - dy * 0.005, MIN_POLAR, MAX_POLAR)
+      const maxPolar = this.interior ? INTERIOR_POLAR_MAX : MAX_POLAR
+      this.desiredPolar = THREE.MathUtils.clamp(this.desiredPolar - dy * 0.005, MIN_POLAR, maxPolar)
       return
     }
 
@@ -533,9 +543,12 @@ export class CameraRig {
       const disc = b * b - a * c
       if (disc > 0) d = Math.min(d, (-b + Math.sqrt(disc)) / a)
     }
-    // The ceiling is the same problem on the other axis, and a simpler one.
+    // The ceiling and the floor are the same problem on the other axis, and simpler ones.
+    // Which of the two applies is just the sign of the ray: tipped back far enough to look
+    // up at the top row, the camera is heading downwards and the deck is what it meets.
     const uy = Math.cos(this.polar)
     if (uy > 1e-6) d = Math.min(d, (room.ceiling - this.target.y) / uy)
+    else if (uy < -1e-6 && room.floor !== undefined) d = Math.min(d, (room.floor - this.target.y) / uy)
     // Never all the way in: a camera at zero is inside the astronaut's head.
     return Math.max(d, 0.9)
   }
