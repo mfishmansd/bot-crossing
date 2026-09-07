@@ -549,7 +549,7 @@ export class CommandDeck {
       ? ''
       : info.summary
         ? ['summary', info.threads, info.repos, info.waiting, info.working, info.blocked, info.done].join('\u0000')
-        : [info.project, info.title, info.tagline, info.readmeState, ...info.threads.map((t) => t.status + t.title)].join('\u0000')
+        : [info.project, info.title, info.tagline, info.readmeState, info.cursor, ...info.threads.map((t) => t.status + t.title)].join('\u0000')
     this.consoleName = info && !info.summary ? info.project : null
     this.console.visible = Boolean(info)
     if (signature === this._consoleSignature) return
@@ -629,23 +629,39 @@ export class CommandDeck {
     y += 26
     const rowH = 27
     const room = Math.max(0, Math.floor((H - 22 - y) / rowH))
-    const shown = info.threads.slice(0, room)
-    for (const t of shown) {
+    // The list scrolls to keep the picked row on the screen, and no further: a list that
+    // recentres on every keypress is one whose rows never stay where you left them.
+    const cursor = Math.max(0, Math.min(info.cursor || 0, info.threads.length - 1))
+    const start = Math.max(0, Math.min(cursor - room + 1, info.threads.length - room))
+    const shown = info.threads.slice(start, start + room)
+    const mark = 14
+    shown.forEach((t, k) => {
+      const picked = start + k === cursor
+      if (picked) {
+        c.fillStyle = 'rgba(63,158,196,0.16)'
+        c.fillRect(pad - 8, y - 19, W - pad * 2 + 16, rowH)
+        c.fillStyle = 'rgba(159,199,242,0.95)'
+        c.fillText('▸', pad - 4, y)
+      }
       const col = STATUS_COLOR[t.status] || STATUS_COLOR.idle
       c.font = 'bold 16px ui-monospace, SFMono-Regular, Menlo, monospace'
       c.fillStyle = `rgb(${col[0] * 255 | 0},${col[1] * 255 | 0},${col[2] * 255 | 0})`
-      const word = t.status.toUpperCase()
-      c.fillText(word, pad, y)
+      c.fillText(t.status.toUpperCase(), pad + mark, y)
       const wordW = 118
       c.font = '17px ui-monospace, SFMono-Regular, Menlo, monospace'
-      c.fillStyle = 'rgba(255,255,255,0.85)'
-      c.fillText(ellipsize(c, t.title || '(untitled)', width - wordW), pad + wordW, y)
+      c.fillStyle = picked ? 'rgba(255,255,255,0.98)' : 'rgba(255,255,255,0.8)'
+      c.fillText(ellipsize(c, t.title || '(untitled)', width - wordW - mark), pad + mark + wordW, y)
       y += rowH
-    }
-    if (info.threads.length > shown.length) {
+    })
+    const above = start
+    const below = info.threads.length - (start + shown.length)
+    if (above || below) {
       c.font = '15px ui-monospace, SFMono-Regular, Menlo, monospace'
       c.fillStyle = 'rgba(255,255,255,0.4)'
-      c.fillText(`… and ${info.threads.length - shown.length} more`, pad, y)
+      const parts = []
+      if (above) parts.push(`${above} above`)
+      if (below) parts.push(`${below} more`)
+      c.fillText(`… ${parts.join(' · ')}`, pad, y)
     }
     this.consoleTexture.needsUpdate = true
   }

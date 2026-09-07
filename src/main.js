@@ -631,18 +631,38 @@ function updateDeckFacing() {
     return
   }
   sweepArmed = null
+  colony.deckCursor = 0
   selectProject(entry.project)
   // The console follows the facing repo. Asking for its readme goes through the same
   // loader the surface boards use, so a repo you have already stood near costs nothing.
   readmeFor(pathForProject(entry.project), entry.project)
   colony.deck.setConsole(colony.consoleFor(entry.project))
-  hud.hint(`${entry.project} · Enter opens · A archive · C new · X sweep idle · F folder · N next · E leave`)
+  hud.hint(`${entry.project} · [ ] pick · Enter opens · A archive · C new · X sweep idle · F folder · N next · E leave`)
 }
 
-/** The thread a facing panel stands for — the one that most needs you in that repo. */
+/**
+ * The thread the console has picked in the facing repo. The queue is worst first and the
+ * pick starts at the top, so with no keys pressed this is the one that most needs you —
+ * and [ and ] walk it down the list.
+ */
 function facingThread() {
   const entry = colony.aboard ? colony.deck.entryAt(deckFacing) : null
-  return entry?.threadId ? threads.find((t) => t.id === entry.threadId) || null : null
+  if (!entry) return null
+  const info = colony.consoleFor(entry.project)
+  const row = info.threads[info.cursor]
+  return row ? threads.find((t) => t.id === row.id) || null : null
+}
+
+/** [ and ], aboard: move the pick through the facing repo's queue and redraw it. */
+function moveDeckPick(delta) {
+  const entry = colony.deck.entryAt(deckFacing)
+  if (!entry) {
+    hud.hint('Look at a repo first')
+    return
+  }
+  const info = colony.consoleFor(entry.project)
+  colony.deckCursor = Math.max(0, Math.min(info.cursor + delta, info.threads.length - 1))
+  colony.deck.setConsole(colony.consoleFor(entry.project))
 }
 
 /** N, aboard: turn to the next panel that wants you instead of flying off the deck. */
@@ -968,6 +988,11 @@ window.addEventListener('keydown', (e) => {
       e.preventDefault()
       if (selectedProject) actions.revealProject()
       else hud.hint('Look at a repo first')
+      return
+    }
+    if (key === '[' || key === ']') {
+      e.preventDefault()
+      moveDeckPick(key === '[' ? -1 : 1)
       return
     }
     if (e.key === 'Enter' || key === 'a') {

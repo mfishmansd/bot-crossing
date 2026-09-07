@@ -189,6 +189,8 @@ export class Colony {
     // is not inside the ship it belongs to.
     this.deck = new CommandDeck(scene)
     this.aboard = false
+    /** Which row of the facing repo's queue is picked. The page moves it; the console draws it. */
+    this.deckCursor = 0
     this.astronauts = new Astronauts(scene, settings)
     this.astronauts.world = this._world()
     this.indicators = new Indicators(scene, settings, Math.max(64, settings.get('maxAgents')))
@@ -760,7 +762,7 @@ export class Colony {
     const threads = []
     for (const thread of this.threads.values()) {
       if ((thread.project || 'unknown') !== name) continue
-      threads.push({ title: thread.title || '', status: statusFor(thread, now) })
+      threads.push({ id: thread.id, title: thread.title || '', status: statusFor(thread, now) })
     }
     // Worst first, exactly the order Enter works through them.
     threads.sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status))
@@ -770,6 +772,9 @@ export class Colony {
       tagline: summary?.tagline || '',
       readmeState: summary === undefined ? 'loading' : summary === null ? 'none' : 'ready',
       threads,
+      // Kept on the colony rather than passed in, so the tick that refreshes the console
+      // every three quarters of a second does not put the pick back to the top.
+      cursor: Math.max(0, Math.min(this.deckCursor, threads.length - 1)),
     }
   }
 
