@@ -223,24 +223,54 @@ export class Particles {
    */
   flame(x, y, z, dx, dy, dz, ground = 0) {
     if (!this.enabled) return
-    const n = this.settings.get('particles') === 'full' ? 2 : 1
-    for (let i = 0; i < n; i++) {
-      const s = 2.6 + Math.random() * 2.2
-      const hot = Math.random()
+    // Two populations, because a particle's size is fixed for its life and the pool is
+    // additive: a flame is nothing but overlap, and overlap is what a stream of same-sized
+    // particles moving apart never has. The body is a few big, nearly stationary points at
+    // the nozzle that live for a handful of frames; the tail is smaller, longer-lived ones
+    // carried down the jet, shrinking and reddening as they go. One astronaut wears this,
+    // so it is not budgeted like the crowd's dust — a thin flame is worse than no flame.
+    const full = this.settings.get('particles') === 'full'
+    const body = full ? 4 : 3
+    const tail = full ? 6 : 4
+
+    for (let i = 0; i < body; i++) {
+      const k = Math.random() * 0.12
       this.glow.spawn(
-        x + (Math.random() - 0.5) * 0.08,
-        y + (Math.random() - 0.5) * 0.06,
-        z + (Math.random() - 0.5) * 0.08,
-        dx * s + (Math.random() - 0.5) * 0.7,
-        dy * s + (Math.random() - 0.5) * 0.7,
-        dz * s + (Math.random() - 0.5) * 0.7,
-        // White-yellow at the nozzle, orange as it cools; pushed past one for the bloom.
+        x + dx * k + (Math.random() - 0.5) * 0.05,
+        y + dy * k + (Math.random() - 0.5) * 0.05,
+        z + dz * k + (Math.random() - 0.5) * 0.05,
+        dx * 0.6 + (Math.random() - 0.5) * 0.2,
+        dy * 0.6 + (Math.random() - 0.5) * 0.2,
+        dz * 0.6 + (Math.random() - 0.5) * 0.2,
+        // White-yellow, well past one: the core is what the bloom pass picks up.
+        3.0,
+        2.5,
+        1.3,
+        0.42 + Math.random() * 0.22,
+        0.07 + Math.random() * 0.06,
+        1.5,
+        0,
+        ground
+      )
+    }
+
+    for (let i = 0; i < tail; i++) {
+      const k = Math.random()
+      const s = 1.3 + Math.random() * 1.2
+      this.glow.spawn(
+        x + dx * k * 0.3 + (Math.random() - 0.5) * 0.06,
+        y + dy * k * 0.3 + (Math.random() - 0.5) * 0.06,
+        z + dz * k * 0.3 + (Math.random() - 0.5) * 0.06,
+        dx * s + (Math.random() - 0.5) * 0.3,
+        dy * s + (Math.random() - 0.5) * 0.3,
+        dz * s + (Math.random() - 0.5) * 0.3,
+        // Orange at the root cooling to red at the tip.
+        2.6 - k * 0.3,
+        1.4 - k * 0.9,
+        0.45 - k * 0.4,
+        (0.3 - k * 0.17) * (0.8 + Math.random() * 0.4),
+        0.26 + Math.random() * 0.2,
         2.6,
-        1.5 + hot * 1.1,
-        0.35 + hot * 0.9,
-        0.06 + Math.random() * 0.05,
-        0.16 + Math.random() * 0.16,
-        2.8,
         0,
         ground
       )
