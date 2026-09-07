@@ -654,6 +654,7 @@ export class Colony {
     this.aboard = true
     this.deck.setAboard(true)
     this.syncDeck()
+    this.deck.setConsole(this.consoleSummary())
     return agent
   }
 
@@ -727,6 +728,24 @@ export class Colony {
       })
     }
     this.deck.sync(rows)
+  }
+
+  /**
+   * The console with nobody's repo on it: the colony's own numbers, the same ones the HUD
+   * chips show. Counted off `stats`, which the roster pass fills from every thread before
+   * the crew cap is applied — so these are the colony, not the sample of it on the surface.
+   */
+  consoleSummary() {
+    const s = this.stats
+    return {
+      summary: true,
+      threads: s.agents,
+      repos: this.plotOrder.length,
+      waiting: s.waiting || 0,
+      working: s.working || 0,
+      blocked: s.blocked || 0,
+      done: s.done || 0,
+    }
   }
 
   /**
@@ -1035,6 +1054,7 @@ export class Colony {
         this._deckAge = 0
         this.syncDeck()
         if (this.deck.consoleName) this.deck.setConsole(this.consoleFor(this.deck.consoleName))
+        else this.deck.setConsole(this.consoleSummary())
       }
     }
 

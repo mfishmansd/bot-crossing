@@ -501,11 +501,18 @@ let deckFacing = -1
 let deckCandidate = -1
 let deckCandidateFrames = 0
 
+/**
+ * Whoever is nearest the middle of the view. Size is deliberately not a filter: from the
+ * map's height every astronaut is drawn at LOD scale zero, and a version of this that
+ * skipped small ones answered "nobody is out on the surface" from exactly the view you are
+ * usually in — which made the one key that starts walking, flying and the deck fail by
+ * default. The camera knows how to fly down to whoever is picked.
+ */
 function nearestAgent() {
   let best = null
   let bestD = Infinity
   for (const agent of colony.astronauts.agents) {
-    if (agent.scale < 0.5 || agent.state === 'leaving' || agent.state === 'gone') continue
+    if (agent.state === 'leaving' || agent.state === 'gone') continue
     const d = (agent.pos.x - rig.target.x) ** 2 + (agent.pos.z - rig.target.z) ** 2
     if (d < bestD) {
       bestD = d
@@ -607,7 +614,11 @@ function updateDeckFacing() {
   deckFacing = panel
   colony.deck.setFocused(panel)
   const entry = colony.deck.entryAt(panel)
-  if (!entry) return
+  if (!entry) {
+    // A dark panel, or the gap above the top row: the console shows the colony instead.
+    colony.deck.setConsole(colony.consoleSummary())
+    return
+  }
   selectProject(entry.project)
   // The console follows the facing repo. Asking for its readme goes through the same
   // loader the surface boards use, so a repo you have already stood near costs nothing.

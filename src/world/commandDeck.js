@@ -545,10 +545,12 @@ export class CommandDeck {
    * when what it says has changed, for the same reason as the wall.
    */
   setConsole(info) {
-    const signature = info
-      ? [info.project, info.title, info.tagline, info.readmeState, ...info.threads.map((t) => t.status + t.title)].join('\u0000')
-      : ''
-    this.consoleName = info ? info.project : null
+    const signature = !info
+      ? ''
+      : info.summary
+        ? ['summary', info.threads, info.repos, info.waiting, info.working, info.blocked, info.done].join('\u0000')
+        : [info.project, info.title, info.tagline, info.readmeState, ...info.threads.map((t) => t.status + t.title)].join('\u0000')
+    this.consoleName = info && !info.summary ? info.project : null
     this.console.visible = Boolean(info)
     if (signature === this._consoleSignature) return
     this._consoleSignature = signature
@@ -567,6 +569,10 @@ export class CommandDeck {
     c.strokeRect(1.5, 1.5, W - 3, H - 3)
     if (!info) {
       this.consoleTexture.needsUpdate = true
+      return
+    }
+    if (info.summary) {
+      this._drawSummary(info)
       return
     }
 
@@ -641,6 +647,61 @@ export class CommandDeck {
       c.fillStyle = 'rgba(255,255,255,0.4)'
       c.fillText(`… and ${info.threads.length - shown.length} more`, pad, y)
     }
+    this.consoleTexture.needsUpdate = true
+  }
+
+  /**
+   * The console with nothing faced: the colony at a glance. Four numbers in the wall's own
+   * colours for the four states that matter, then the size of the place. This is what the
+   * middle of the room says the moment you walk in, before you have looked at anything.
+   */
+  _drawSummary(info) {
+    const c = this.consoleCtx
+    const W = this.consoleCanvas.width
+    const H = this.consoleCanvas.height
+    const pad = 26
+
+    c.font = 'bold 30px ui-monospace, SFMono-Regular, Menlo, monospace'
+    c.fillStyle = 'rgba(255,255,255,0.97)'
+    c.fillText('THE COLONY', pad, 50)
+    c.strokeStyle = 'rgba(63,158,196,0.55)'
+    c.lineWidth = 2
+    c.beginPath()
+    c.moveTo(pad, 64)
+    c.lineTo(W - pad, 64)
+    c.stroke()
+
+    const cells = [
+      ['need you', info.waiting, STATUS_COLOR.waiting],
+      ['building', info.working, STATUS_COLOR.working],
+      ['stuck', info.blocked, STATUS_COLOR.blocked],
+      ['shipped', info.done, STATUS_COLOR.celebrating],
+    ]
+    const colW = (W - pad * 2) / cells.length
+    cells.forEach(([label, n, col], i) => {
+      const x = pad + colW * i + colW / 2
+      c.textAlign = 'center'
+      // A zero is drawn quiet rather than left out: four columns that are always the same
+      // four is a layout you can read without looking, which is the point of a dashboard.
+      const alive = n > 0
+      c.font = 'bold 64px ui-monospace, SFMono-Regular, Menlo, monospace'
+      c.fillStyle = alive ? `rgb(${(col[0] * 255) | 0},${(col[1] * 255) | 0},${(col[2] * 255) | 0})` : 'rgba(255,255,255,0.22)'
+      c.fillText(String(n), x, 178)
+      c.font = '17px ui-monospace, SFMono-Regular, Menlo, monospace'
+      c.fillStyle = alive ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.3)'
+      c.fillText(label, x, 208)
+    })
+    c.textAlign = 'left'
+
+    c.font = '20px ui-monospace, SFMono-Regular, Menlo, monospace'
+    c.fillStyle = 'rgba(255,255,255,0.72)'
+    const threads = info.threads === 1 ? '1 thread' : `${info.threads} threads`
+    const repos = info.repos === 1 ? '1 repo' : `${info.repos} repos`
+    c.fillText(`${threads} across ${repos}`, pad, 292)
+
+    c.font = '16px ui-monospace, SFMono-Regular, Menlo, monospace'
+    c.fillStyle = 'rgba(255,255,255,0.38)'
+    c.fillText('look at a panel for its repo · N for the next that needs you', pad, H - 30)
     this.consoleTexture.needsUpdate = true
   }
 
