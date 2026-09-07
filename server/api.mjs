@@ -32,6 +32,7 @@ const emptyState = () => ({
   opened: [],
   plots: {},
   seen: {},
+  lastDeckVisit: 0,
   settings: null,
   updatedAt: 0,
 })
