@@ -197,7 +197,12 @@ export class CameraRig {
       const d = this._pinchDistance()
       const [cx, cy] = this._pinchCentre()
       if (this._pinch > 0 && d > 0) {
-        this.desiredDistance = THREE.MathUtils.clamp(this.desiredDistance * (this._pinch / d), MIN_DIST, MAX_DIST)
+        // The same limits the wheel uses: walking and indoors have their own leash, and a
+        // pinch that ignored it could put the camera through the deck's wall.
+        const dist = this.interior ? INTERIOR_DIST : WALK_DIST
+        const lo = this.walking ? dist.min : MIN_DIST
+        const hi = this.walking ? dist.max : MAX_DIST
+        this.desiredDistance = THREE.MathUtils.clamp(this.desiredDistance * (this._pinch / d), lo, hi)
         this.distance = this.desiredDistance
         this._sync()
       }

@@ -393,7 +393,15 @@ export class Colony {
     // entry's slot was fixed above before it happens, so nobody moves house; a thread that
     // wakes up gains an astronaut, and one that nods off may lose its turn, which is what
     // the surface is for.
-    roster.sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status))
+    // The one you are wearing goes first regardless. Sorting by what needs you means a
+    // thread's place in the cap can change on any poll, and a driven astronaut that fell
+    // past it was sent home mid-walk with a toast saying its thread had finished, which it
+    // had not — you were standing in it.
+    const driven = this.astronauts.drivenId
+    roster.sort(
+      (a, b) =>
+        (b.id === driven) - (a.id === driven) || STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status)
+    )
     this.astronauts.setRoster(roster, this._world())
     return this.stats
   }

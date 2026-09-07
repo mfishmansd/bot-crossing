@@ -270,7 +270,12 @@ export class Astronauts {
     // it: teaching four hundred packs to sample an atlas so that one of them can show a
     // logo is the wrong trade, and a single plane moved to the right pack each frame is
     // the whole of the job. Its artwork comes from `setLogo`, with a plain P until then.
-    if (this.logo) this.group.remove(this.logo)
+    if (this.logo) {
+      this.group.remove(this.logo)
+      this.logo.geometry.dispose()
+      this.logo.material.map?.dispose()
+      this.logo.material.dispose()
+    }
     this.logo = new THREE.Mesh(
       new THREE.PlaneGeometry(R * 0.62, R * 0.62),
       new THREE.MeshBasicMaterial({ map: this._logoTexture(), transparent: true, toneMapped: false, depthWrite: false })
@@ -1145,6 +1150,15 @@ export class Astronauts {
     agent.bounds = null
     agent.groundAt = null
     agent.groundY = null
+    // And back on the map. Flown far enough out and let go, an astronaut stood off the
+    // grid's edge, where every step is refused and there is no nearest free cell to be
+    // walked to — frozen for the session. It comes down at the ramp instead.
+    if (this.nav && this.nav.isBlocked(agent.pos.x, agent.pos.z, true) && !this.nav.nearestFree(agent.pos.x, agent.pos.z)) {
+      const door = this.world?.shipDoor?.()
+      if (door) agent.pos.set(door.x, door.y, door.z)
+    }
+    agent.hop = 0
+    agent.hopVel = 0
     // Its own suit back, and its own status colours with it.
     if (agent.wasSuit !== undefined) agent.suit = agent.wasSuit
     agent.wasSuit = undefined
@@ -1734,6 +1748,11 @@ export class Astronauts {
       mesh.material.dispose()
     }
     this._disposeCrew()
+    if (this.logo) {
+      this.logo.geometry.dispose()
+      this.logo.material.map?.dispose()
+      this.logo.material.dispose()
+    }
     // The bone texture is the rig's, not this instance's — the rig outlives any one colony.
     this.faceTexture.dispose()
     this.scene.remove(this.group)

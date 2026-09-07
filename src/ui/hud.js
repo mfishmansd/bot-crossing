@@ -531,6 +531,12 @@ export class Hud {
     const tab = this.$('.tabs .tab[data-tab="readme"]')
     const state = readme?.state || 'loading'
     tab.dataset.state = state
+    // Written only when the document actually changed. The panel's signature moves on
+    // every poll — a live thread's activity is in it — and rewriting the same HTML threw
+    // away wherever you had scrolled to, fifteen seconds at a time.
+    const key = `${state}:${readme?.folder || ''}:${readme?.key || ''}`
+    if (key === this._readmeKey) return
+    this._readmeKey = key
 
     if (state === 'ready' && readme.html) {
       pane.className = 'readme'

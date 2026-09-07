@@ -401,12 +401,14 @@ function readmeFor(folder, name) {
       const summary = res.found ? readmeSummary(res.text, name) : null
       readmes.set(folder, { state: res.found ? 'ready' : 'none', summary, at: Date.now() })
       colony.setReadme(name, summary)
+      if (selectedProject === name) syncProject()
     })
     .catch(() => {
       // Told as "no readme" rather than left unanswered: an unanswered zone is one the
       // sweep asks about again on every pass, for as long as you stand near it.
       readmes.set(folder, { state: 'error', summary: null, at: Date.now() })
       colony.setReadme(name, null)
+      if (selectedProject === name) syncProject()
     })
 
   return entry
@@ -471,7 +473,10 @@ function syncProject() {
     path,
     threads: list,
     selectedId,
-    readme: { ...readmePanel(path), summary: readmes.get(path)?.summary || null },
+    // The summary is what the astronaut says when asked what this place is. Only the sign
+    // sweep and the deck used to ask for it, so a repo you had not stood near answered
+    // "there is no readme" while the tab beside it rendered one.
+    readme: { ...readmePanel(path), summary: (path && readmeFor(path, plot.name))?.summary || null },
   })
   // The legend is the same selection seen from the bottom of the screen: keep it in step
   // here rather than only on the next poll.
@@ -587,16 +592,9 @@ function stopWalk() {
 // scan — and when it is, the page has to put the camera back rather than follow a ghost.
 colony.astronauts.onReleased = () => {
   if (!walkingId) return
-  if (colony.aboard) leaveDeck()
-  rig.setInterior(null)
-  colony.deck.setFocused(-1)
-  deckFacing = deckCandidate = -1
-  atHatch = false
-  walkingId = null
-  rig.setWalking(false)
-  colony.setLabelsInWorld(false)
-  engine.setFocusScale(1)
-  hud.setWalking(null)
+  // Letting go is letting go: the same routine as Esc, so the two can never drift apart
+  // again — they had, by three lines.
+  stopWalk()
   hud.toast('That thread has finished — you are back on the map')
 }
 
@@ -649,7 +647,11 @@ function updateDeckFacing() {
   selectProject(entry.project)
   // The console follows the facing repo. Asking for its readme goes through the same
   // loader the surface boards use, so a repo you have already stood near costs nothing.
-  readmeFor(pathForProject(entry.project), entry.project)
+  const folder = pathForProject(entry.project)
+  if (folder) readmeFor(folder, entry.project)
+  // No folder on disk — a thread with no workspace, say — and there is nothing to read.
+  // Said so, or the console shows "reading the readme…" for as long as you look at it.
+  else colony.setReadme(entry.project, null)
   colony.deck.setConsole(colony.consoleFor(entry.project))
   hud.hint(`${entry.project} · T step out onto it · [ ] pick · Enter opens · A archive · C new · X sweep · F folder · N next · / find · E leave`)
 }

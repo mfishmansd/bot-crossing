@@ -43,7 +43,6 @@ const SQRT2 = Math.SQRT2
 export class Navigation {
   constructor() {
     this.cell = CELL
-    this.generation = 0
     /** Bumped on every rebuild; agents use it to notice their path is stale. */
     this.version = 0
     this._allocate(HALF)
@@ -130,7 +129,6 @@ export class Navigation {
   rebuild(obstacles) {
     this.blocked.fill(0)
     this.solid.fill(0)
-    const { size, cell } = this
 
     for (const o of obstacles) {
       this._stamp(this.blocked, o.x, o.z, o.r)
@@ -139,7 +137,6 @@ export class Navigation {
       this._stamp(this.solid, o.x, o.z, o.rSolid)
     }
     this.version++
-    void cell
   }
 
   /** Paint one circle into one map. Shared by both passes of `rebuild`. */

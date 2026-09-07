@@ -206,7 +206,7 @@ export function plain(md) {
   return String(md || '')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/<[^<>]{0,400}>/g, '')
+    .replace(/<\/?[a-zA-Z][^<>]*>/g, '')
     .replace(/`+/g, '')
     .replace(/[*_~]{1,3}/g, '')
     .replace(/\s+/g, ' ')
@@ -338,7 +338,7 @@ function inline(text) {
       codes.push(body)
       return `${HOLD}${codes.length - 1}${HOLD}`
     })
-    .replace(/<[^<>]{0,400}>/g, '')
+    .replace(/<\/?[a-zA-Z][^<>]*>/g, '')
 
   s = escapeHtml(s)
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
