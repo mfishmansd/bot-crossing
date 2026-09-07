@@ -206,7 +206,7 @@ export function plain(md) {
   return String(md || '')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/<\/?[a-zA-Z][^<>]*>/g, '')
+    .replace(/<\/?(?:a|abbr|b|big|blockquote|br|center|code|del|details|div|em|font|h[1-6]|hr|i|img|ins|kbd|li|ol|p|picture|pre|s|small|source|span|strong|sub|summary|sup|table|tbody|td|th|thead|tr|u|ul|video|audio)\b[^<>]*>/gi, '')
     .replace(/`+/g, '')
     .replace(/[*_~]{1,3}/g, '')
     .replace(/\s+/g, ' ')
@@ -328,6 +328,11 @@ function build(items, start) {
  * Inline markup, in the one order that works: code spans are lifted out before anything
  * else can see them, everything left is escaped, and only then is markup put back — so a
  * `**` inside backticks stays two asterisks and a `<` anywhere at all stays a `<`.
+ *
+ * Only *known* HTML tags are stripped — the ones a README actually contains — because a
+ * regex cannot tell a tag from a type: `Map<string, number>` and `Foo<T>` are shaped like
+ * `<b>` and were losing their brackets to it. A bracket that is not one of those names is
+ * prose, and prose is escaped and kept.
  */
 function inline(text) {
   const codes = []
@@ -338,7 +343,7 @@ function inline(text) {
       codes.push(body)
       return `${HOLD}${codes.length - 1}${HOLD}`
     })
-    .replace(/<\/?[a-zA-Z][^<>]*>/g, '')
+    .replace(/<\/?(?:a|abbr|b|big|blockquote|br|center|code|del|details|div|em|font|h[1-6]|hr|i|img|ins|kbd|li|ol|p|picture|pre|s|small|source|span|strong|sub|summary|sup|table|tbody|td|th|thead|tr|u|ul|video|audio)\b[^<>]*>/gi, '')
 
   s = escapeHtml(s)
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
