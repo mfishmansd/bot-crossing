@@ -439,6 +439,7 @@ export class Colony {
       label.position.set(plot.labelAnchor.x, 3.2, plot.labelAnchor.z)
       plot.label = label
       this.labelGroup.add(label)
+      label.material.depthTest = this._labelsInWorld === true
 
       // Where its sign would stand, whether or not it ever gets one: the sweep needs the
       // distance from the camera to a board that does not exist yet in order to decide
@@ -742,6 +743,20 @@ export class Colony {
       readmeState: summary === undefined ? 'loading' : summary === null ? 'none' : 'ready',
       threads,
     }
+  }
+
+  /**
+   * Whether the zone name plates are things in the world or labels over it.
+   *
+   * On the map they are labels: drawn over everything, so a habitat between you and a name
+   * can never cut it in half. That is the right call from forty units up and exactly the
+   * wrong one from the ground, where the same rule paints "AriInvitation" across the back
+   * of the helmet you are wearing. Walking, the plates go back into the world and are
+   * covered by whatever is in front of them — which is what a sign is.
+   */
+  setLabelsInWorld(on) {
+    this._labelsInWorld = on
+    for (const label of this.labelGroup.children) label.material.depthTest = on
   }
 
   /** The plot under a world point. On a hex lattice the nearest cell centre is the cell. */

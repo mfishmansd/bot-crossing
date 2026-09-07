@@ -520,6 +520,8 @@ function startWalk(agent) {
   walkingId = agent.id
   held.clear()
   rig.setWalking(true)
+  // Name plates stop floating over the scene and take their place in it — see the colony.
+  colony.setLabelsInWorld(true)
   // The shallow focus is what makes the colony a model on a table; from inside it, it is
   // just fog a few metres out.
   engine.setFocusScale(0.3)
@@ -544,6 +546,7 @@ function stopWalk() {
   held.clear()
   colony.astronauts.release()
   rig.setWalking(false)
+  colony.setLabelsInWorld(false)
   engine.setFocusScale(1)
   hud.setWalking(null)
 }
@@ -559,6 +562,7 @@ colony.astronauts.onReleased = () => {
   atHatch = false
   walkingId = null
   rig.setWalking(false)
+  colony.setLabelsInWorld(false)
   engine.setFocusScale(1)
   hud.setWalking(null)
   hud.toast('That thread has finished — you are back on the map')
