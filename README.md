@@ -571,6 +571,14 @@ many and how long ago — `9 repos moved since your last visit, yesterday`. It i
 difference rather than a state, which is why it is the console's blue and not a status
 colour, and why it is gone the next time you come in.
 
+### The hologram
+
+Over the plinth, under the console, the colony itself: one tiny hex per repo laid out
+exactly as the zones are on the surface, in the wall's colours, turning slowly. The repo
+you are facing is raised and lit on it — which on a map is what *you are here* has always
+looked like. It is the same data as the wall seen as a map instead of a list, and it is one
+instanced mesh and one draw call, by the same trick as the wall and the crew.
+
 ### The console
 
 The wall says what every repo is doing. The console over the plinth says what the one you

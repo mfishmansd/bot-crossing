@@ -75,6 +75,17 @@ const STATUS_COLOR = {
 const DARK = [0.05, 0.055, 0.075]
 
 /**
+ * The hologram over the plinth: the colony's own layout, one tiny hex per repo, in the
+ * wall's colours, turning slowly. It fits in the gap between the plinth and the console —
+ * radius is what fits, and the scale is whatever brings the colony's reach down to it.
+ * Cells on the surface are 7.6 apart; a hex here is a little over half a cell so the map
+ * reads as tiles with gaps rather than a blur.
+ */
+const HOLO_R = 1.25
+const HOLO_Y = 1.02
+const HOLO_MAX = 512
+
+/**
  * The wall's contents, as one texture.
  *
  * Two hundred panels showing two hundred different things could be two hundred canvases and
@@ -162,6 +173,9 @@ export class CommandDeck {
     this.focused = -1
     /** Which repo the console is showing, or null when it is showing nothing. */
     this.consoleName = null
+    /** Hologram instance per repo name, so the facing repo's tile can be lit. */
+    this._holoIndex = new Map()
+    this._holoLit = -1
 
     this._buildShell()
     this._buildScreens()
@@ -446,6 +460,7 @@ export class CommandDeck {
     this.group.add(top)
 
     this._buildConsole()
+    this._buildHologram()
 
     // Unlit screens throw no light of their own, so these stand in for the bounce.
     const fill = new THREE.PointLight(0x74b8dc, 6, 26, 2)
@@ -472,6 +487,7 @@ export class CommandDeck {
     const byPanel = new Array(panels.length).fill(null)
     for (let k = 0; k < entries.length && k < this.order.length; k++) byPanel[this.order[k]] = entries[k]
     this._byPanel = byPanel
+    this._syncHologram(entries)
     // Redrawing two hundred cells of text is cheap next to a poll and ruinous next to a
     // frame, so it happens only when the wall is actually showing something else. Colour
     // still follows every sync: a thread changing what it is doing is a tint, not a redraw.
@@ -493,6 +509,7 @@ export class CommandDeck {
 
   update(dt, elapsed, cameraPos) {
     if (!this.group.visible) return
+    this._updateHologram(dt)
     if (cameraPos && this.console.visible) {
       // Yaw only. Pitching to face a camera that is above you tips the screen back like a
       // tray, and a screen that leans is one that looks like it is about to fall over.
@@ -557,6 +574,88 @@ export class CommandDeck {
     this.group.add(stem)
 
     this._drawConsole(null)
+  }
+
+  /**
+   * One instanced mesh of hexes, one draw call, the same trick as the wall and the crew.
+   * Colour is per instance and is the only thing that changes between repos; the tile you
+   * are facing is raised a little and brightened, which on a map is what "you are here"
+   * has always looked like.
+   */
+  _buildHologram() {
+    this.holoGroup = new THREE.Group()
+    this.holoGroup.position.set(0, HOLO_Y, 0)
+    this.group.add(this.holoGroup)
+
+    // A faint plate under the map, so the tiles hang over something.
+    const plate = new THREE.Mesh(
+      new THREE.CircleGeometry(HOLO_R + 0.12, 48),
+      new THREE.MeshBasicMaterial({ color: 0x3f9ec4, transparent: true, opacity: 0.08, toneMapped: false, side: THREE.DoubleSide })
+    )
+    plate.rotation.x = -Math.PI / 2
+    plate.position.y = -0.02
+    this.holoGroup.add(plate)
+
+    const geo = new THREE.CylinderGeometry(1, 1, 0.04, 6)
+    const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.88, toneMapped: false })
+    this.holo = new THREE.InstancedMesh(geo, mat, HOLO_MAX)
+    this.holo.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+    this.holo.frustumCulled = false
+    this.holo.count = 0
+    this.holoGroup.add(this.holo)
+  }
+
+  /** Lay the hologram out from the repos' own zone positions. Called from `sync`. */
+  _syncHologram(entries) {
+    const rows = entries.filter((e) => e && Number.isFinite(e.x) && Number.isFinite(e.z))
+    let reach = 1
+    for (const e of rows) reach = Math.max(reach, Math.abs(e.x), Math.abs(e.z))
+    const k = HOLO_R / (reach + 4)
+    const hex = 7.6 * 0.55 * k
+    this._holoScale = { k, hex }
+    this._holoIndex.clear()
+    this._holoLit = -1
+    const n = Math.min(rows.length, HOLO_MAX)
+    for (let i = 0; i < n; i++) {
+      const e = rows[i]
+      this._v.set(e.x * k, 0, e.z * k)
+      this._m.compose(this._v, this._q.identity(), this._one.setScalar(hex))
+      this.holo.setMatrixAt(i, this._m)
+      const col = STATUS_COLOR[e.status] || STATUS_COLOR.idle
+      this.holo.setColorAt(i, this._c.setRGB(col[0], col[1], col[2]))
+      this._holoIndex.set(e.project, i)
+    }
+    this._one.setScalar(1)
+    this.holo.count = n
+    this.holo.instanceMatrix.needsUpdate = true
+    if (this.holo.instanceColor) this.holo.instanceColor.needsUpdate = true
+  }
+
+  /** Light the facing repo's tile; put the last one back. Cheap, so it runs every frame. */
+  _updateHologram(dt) {
+    this.holoGroup.rotation.y += dt * 0.12
+    const entry = this.focused >= 0 ? this._byPanel[this.focused] : null
+    const lit = entry ? (this._holoIndex.get(entry.project) ?? -1) : -1
+    if (lit === this._holoLit) return
+    const { hex } = this._holoScale || { hex: 0.05 }
+    const set = (i, raised) => {
+      if (i < 0) return
+      this.holo.getMatrixAt(i, this._m)
+      this._v.setFromMatrixPosition(this._m)
+      this._v.y = raised ? hex * 1.6 : 0
+      this._m.compose(this._v, this._q.identity(), this._one.setScalar(raised ? hex * 1.35 : hex))
+      this.holo.setMatrixAt(i, this._m)
+      const e = raised ? entry : this._byPanel.find((p) => p && this._holoIndex.get(p.project) === i)
+      const col = STATUS_COLOR[(e && e.status) || 'idle'] || STATUS_COLOR.idle
+      const gain = raised ? 1.9 : 1
+      this.holo.setColorAt(i, this._c.setRGB(col[0] * gain, col[1] * gain, col[2] * gain))
+    }
+    set(this._holoLit, false)
+    set(lit, true)
+    this._one.setScalar(1)
+    this._holoLit = lit
+    this.holo.instanceMatrix.needsUpdate = true
+    if (this.holo.instanceColor) this.holo.instanceColor.needsUpdate = true
   }
 
   /**

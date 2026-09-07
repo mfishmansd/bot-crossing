@@ -744,6 +744,10 @@ export class Colony {
         threadId: row.threadId,
         harness: row.harness,
         moved: row.moved,
+        // Where the zone is, for the hologram over the plinth: the same layout as the
+        // surface, seen from above at a fiftieth of the size.
+        x: (plot.middle || plot.center).x,
+        z: (plot.middle || plot.center).z,
       })
     }
     this.deck.sync(rows)
