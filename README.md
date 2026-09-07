@@ -290,6 +290,10 @@ under **View → Return to isometric**.
 | `R` | Ask the selected astronaut what the repo it is standing on is |
 | `G` | Walk as an astronaut. `WASD` to move, `⇧` to run, `space` to hop — hold it to fly — `Esc` to let go |
 | `E` | At the ship's ramp, go aboard the command deck; again to step back out. Aboard, `N` turns you to the next repo that needs you, and `Enter` / `A` / `C` act on the repo you are looking at |
+| `[` / `]` | Aboard: move the pick through the facing repo's queue. `Enter` and `A` act on the picked thread |
+| `/` | Aboard: find a repo by name — every keystroke turns you to the first match |
+| `X` / `U` | Aboard: archive everything idle over thirty days in the facing repo, or in the colony from the dashboard. Two presses; `U` undoes the last sweep |
+| `F` | Aboard: reveal the facing repo's folder |
 | `O` | Orbit mode |
 | `Tab` | Next planet |
 | `L` | Next time of day |
@@ -520,6 +524,38 @@ you to the next panel that wants you instead of flying the camera off the deck. 
 never grows a second way of doing anything; it is another way of pointing. Selection has a
 dead zone measured in frames rather than degrees, so a drag across the wall does not change
 the sidebar forty times on its way past.
+
+### Acting on what you see
+
+Four things you can do from in here that you could only read about before.
+
+**Pick within a repo.** `Enter` opens the thread that most needs you in the facing repo,
+and for a repo with one thread that is the whole story. For one with nineteen, the console
+already lists them worst first; `[` and `]` move a pick down that list, the list scrolls to
+keep it on screen, and `Enter` and `A` act on the picked one.
+
+**Find a repo by name.** `/` and type. Every keystroke turns you to the first repo whose
+name starts with what you have typed, then the first that contains it; `Enter` keeps it,
+`Esc` lets it go. A hundred and seventy panels is a wall you read; this is one you ask.
+
+**Sweep the idle.** Two thirds of a real projects directory has not been touched in months,
+and nobody reopens a session from three years ago. Facing a repo, `X` offers to archive
+everything in it that has sat idle for more than thirty days — nothing running, nothing
+waiting on you, nothing stuck, and nothing the harness will not let go of — and says how
+many. `X` again inside eight seconds does it; turning to another panel takes the offer off
+the table. From the dashboard it offers the colony. It writes exactly the archive flag the
+sidebar's button writes, one thread at a time through the same call, and that call takes a
+boolean, so `U` puts the last sweep back.
+
+**Open the folder.** `F` reveals the facing repo in Finder — the sidebar's button, as a key.
+
+### Since your last visit
+
+The colony file remembers when you last left the deck. Coming back, any repo with a thread
+that moved since gets a blue dot in the corner of its panel, and the dashboard says how
+many and how long ago — `9 repos moved since your last visit, yesterday`. It is a
+difference rather than a state, which is why it is the console's blue and not a status
+colour, and why it is gone the next time you come in.
 
 ### The console
 
