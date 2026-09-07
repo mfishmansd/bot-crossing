@@ -3,6 +3,7 @@ import './ui/styles.css'
 import { DEFAULT_PRESET, Settings, hasStoredSettings } from './core/settings.js'
 import { Engine } from './core/engine.js'
 import { CameraRig } from './core/camera.js'
+import { Sound } from './core/sound.js'
 import { Colony, STATUS_LABEL, STATUS_ORDER, statusFor, transcriptProgress } from './game/colony.js'
 import { Hud } from './ui/hud.js'
 import { PLANETS } from './world/planet.js'
@@ -48,6 +49,17 @@ if (!hasStoredSettings()) settings.applyPreset(DEFAULT_PRESET)
 const engine = new Engine(settings).mount(app)
 const rig = new CameraRig(engine.camera, engine.canvas, settings)
 const colony = new Colony(engine.scene, settings, engine.camera, engine.renderer)
+const sound = new Sound(settings)
+// Audio may only start on a gesture, so the first key or click of the session is the one
+// that switches it on. Both listeners remove themselves the moment either has fired.
+const wake = () => {
+  sound.ensure()
+  sound.resume()
+  window.removeEventListener('keydown', wake)
+  window.removeEventListener('pointerdown', wake)
+}
+window.addEventListener('keydown', wake)
+window.addEventListener('pointerdown', wake)
 // The badge on your own pack. Served from a gitignored folder: it is your mark, and the
 // repository is public. If the file is not there you get a plain P and nothing breaks.
 colony.astronauts.setLogo(`${import.meta.env.BASE_URL}assets/local/privion-mark.svg`)
@@ -675,6 +687,7 @@ function turnToNextUrgent() {
     return
   }
   rig.turnTo(colony.deck.panelCenter(panel, _hatch))
+  sound.tick()
 }
 
 /**
@@ -766,6 +779,7 @@ async function runSweep(list, where) {
   // means the colony is hiding it on its own, and you should know which kind you did.
   const note = hereOnly ? ` (${hereOnly} here only, no harness record)` : ''
   hud.toast(`Archived ${done.length} in ${where}${note} · U to undo`)
+  sound.chime()
 }
 
 /** U, aboard: put the last sweep back. The same call with the other boolean. */
@@ -862,6 +876,7 @@ function leaveDeck(at = null) {
 function disembark(at, hint) {
   const agent = leaveDeck(at)
   if (!agent) return
+  sound.whoosh()
   deckSearch = null
   deckFacing = deckCandidate = -1
   colony.deck.setFocused(-1)
@@ -901,6 +916,7 @@ function toggleAboard() {
   colony.setDeckSince(state.lastDeckVisit || 0)
   const aboard = colony.boardShip()
   if (!aboard) return
+  sound.whoosh()
   rig.setInterior(colony.deck.cameraBounds())
   rig.snapTo(aboard.pos)
   // Nearly off. The shallow focus is what makes the colony read as a model on a table, and
@@ -1120,7 +1136,11 @@ window.addEventListener('keydown', (e) => {
   if (walkingId && WALK_KEYS.has(key)) {
     e.preventDefault()
     // Space taps a hop and, held, keeps the jetpack lit — so it is held like the rest.
-    if (key === ' ') colony.astronauts.hop(walkingId)
+    if (key === ' ') {
+      const me = colony.astronauts.driven
+      if (me && !held.has(' ') && me.hop === 0 && me.hopVel === 0) sound.hop()
+      colony.astronauts.hop(walkingId)
+    }
     held.add(key)
     return
   }
@@ -1177,6 +1197,13 @@ window.addEventListener('keydown', (e) => {
     case 'R':
       if (selectedId) hud.toggleAsk()
       break
+    case 'm':
+    case 'M': {
+      const on = !settings.get('sound')
+      settings.set('sound', on)
+      hud.hint(on ? 'Sound on' : 'Sound off')
+      break
+    }
     case '?':
       hud.toggleHelp()
       break
@@ -1339,6 +1366,7 @@ settings.onChange((changed, scope) => {
   queueSave()
   if (scope.render || changed.has('fov')) engine.applySettings()
   colony.onSettingsChanged(changed, scope)
+  sound.onSettingsChanged(changed)
   if (changed.has('showFps')) hud.syncSettings()
   if (changed.has('maxAgents')) applyThreads(threads)
 })
@@ -1348,6 +1376,7 @@ settings.onChange((changed, scope) => {
 engine.add({
   update(dt, elapsed) {
     if (walkingId) driveInput()
+    sound.jet(Boolean(colony.astronauts.driven?.thrusting))
     updateHatchPrompt()
     updateDeckFacing()
     rig.update(dt)

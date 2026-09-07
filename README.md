@@ -301,6 +301,7 @@ under **View → Return to isometric**.
 | `P` | Screenshot |
 | `0` | Reset the view |
 | `Esc` | Deselect, and close the zone sidebar |
+| `M` | Sound on / off |
 | `?` | Help |
 
 ## Walking one of them
@@ -469,6 +470,16 @@ PNG there as `privion-mark.svg` (or point `setLogo` at your own file in `main.js
 is fitted to the pack with a margin and its own ratio kept. Nothing in that folder is ever
 committed — the marks in there are yours and this repository is public — and a fresh clone
 sees a plain **P** and nothing breaks.
+
+### Sound
+
+Synthesised, all of it: the jetpack is filtered noise, a hop is a short rising tone, a
+door — the hatch, the ramp, a teleport — is a falling one, a sweep finished is two notes,
+and the deck ticks when `N` finds you the next repo. WebAudio makes every one of those from
+arithmetic, which keeps the runtime's dependency count where it is and the repository free
+of anybody's samples. Browsers refuse to start audio before a gesture, so the first key or
+click of a session is what switches it on. `M` toggles it, and so does the switch in
+Settings.
 
 ## The command deck
 

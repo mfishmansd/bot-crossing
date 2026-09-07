@@ -229,6 +229,7 @@ export class Hud {
       this._toggle('Project labels', 'showLabels'),
       this._toggle('Readme signs', 'showSigns', 'The board on each plot, carrying the first line of that repo’s README.'),
       this._toggle('Reduced motion', 'reducedMotion', 'Calms the bobbing and the camera easing.'),
+      this._toggle('Sound', 'sound', 'The jetpack, hops, doors and the deck. Synthesised — nothing to download. M toggles it.'),
       this._toggle('Show FPS', 'showFps')
     )
     body.appendChild(view)
@@ -1093,6 +1094,7 @@ const TEMPLATE = `
         <div class="k"><span>Aboard: archive the idle</span><kbd>X</kbd> <kbd>U</kbd></div>
         <div class="k"><span>Aboard: open its folder</span><kbd>F</kbd></div>
         <div class="k"><span>Aboard: step out onto that repo</span><kbd>T</kbd></div>
+        <div class="k"><span>Sound on / off</span><kbd>M</kbd></div>
         <div class="k"><span>Orbit mode</span><kbd>O</kbd></div>
         <div class="k"><span>Change planet</span><kbd>Tab</kbd></div>
         <div class="k"><span>Time of day</span><kbd>L</kbd></div>

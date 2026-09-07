@@ -140,6 +140,8 @@ const DEFAULTS = {
   showLabels: true,
   showSigns: true, // the readme board on each repo's plot
   reducedMotion: false,
+  /** Synthesised effects — the jetpack, hops, doors, the deck. Nothing is downloaded. */
+  sound: true,
 }
 
 /** Keys whose change forces a full rebuild of the world (terrain, scatter, sky). */
