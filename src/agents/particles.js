@@ -215,6 +215,38 @@ export class Particles {
     if (changed.has('particles')) this.setEnabled(this.settings.particleBudget > 0)
   }
 
+  /**
+   * Jetpack exhaust: a short hot jet out of the bottom of the pack, along `d`, which is the
+   * body's own downward — so it points at the ground while you climb and streams out behind
+   * you once you are lying flat. Short-lived and drag-heavy on purpose: a flame that
+   * travels reads as a rocket plume, and this is a pack, not a launch.
+   */
+  flame(x, y, z, dx, dy, dz, ground = 0) {
+    if (!this.enabled) return
+    const n = this.settings.get('particles') === 'full' ? 2 : 1
+    for (let i = 0; i < n; i++) {
+      const s = 2.6 + Math.random() * 2.2
+      const hot = Math.random()
+      this.glow.spawn(
+        x + (Math.random() - 0.5) * 0.08,
+        y + (Math.random() - 0.5) * 0.06,
+        z + (Math.random() - 0.5) * 0.08,
+        dx * s + (Math.random() - 0.5) * 0.7,
+        dy * s + (Math.random() - 0.5) * 0.7,
+        dz * s + (Math.random() - 0.5) * 0.7,
+        // White-yellow at the nozzle, orange as it cools; pushed past one for the bloom.
+        2.6,
+        1.5 + hot * 1.1,
+        0.35 + hot * 0.9,
+        0.06 + Math.random() * 0.05,
+        0.16 + Math.random() * 0.16,
+        2.8,
+        0,
+        ground
+      )
+    }
+  }
+
   /** Welding sparks from an astronaut's hands. `ground` is what the welder is standing on. */
   weld(x, y, z, color, ground = 0) {
     if (!this.enabled) return

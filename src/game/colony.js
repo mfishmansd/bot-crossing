@@ -1086,6 +1086,14 @@ export class Colony {
       // under it. Everything thrown off an astronaut has to land back on the same surface.
       const ground = agent.groundY || 0
 
+      // The jetpack, while it is lit. Every frame rather than on a beat, because a flame
+      // that stutters is a flame that is going out.
+      if (agent.thrusting && agent.exhaust) {
+        const ex = agent.exhaust
+        const ed = agent.exhaustDir
+        this.particles.flame(ex.x, ex.y, ex.z, ed.x, ed.y, ed.z, ground)
+      }
+
       if (agent.state === 'at-site' && agent.status === 'working') {
         // Sparks on the downbeat of the hammer swing, not every frame.
         const swing = Math.sin(agent.workSwing)

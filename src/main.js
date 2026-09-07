@@ -689,7 +689,10 @@ function driveInput() {
   // point is also the pivot you tip around — keeping it at chest height would mean the
   // camera had to drop to the floor to look up at all, and the top row is nearly six units
   // above that floor.
-  walkAim.set(agent.pos.x, agent.pos.y + (colony.aboard ? 1.75 : 0.9), agent.pos.z)
+  // And lower still when the body is lying flat: the chest of a flying astronaut is near
+  // its feet, and a camera aimed where the chest used to be is aimed at empty air.
+  const lift = (colony.aboard ? 1.75 : 0.9) * (1 - 0.55 * Math.sin(agent.pitch))
+  walkAim.set(agent.pos.x, agent.pos.y + lift, agent.pos.z)
   rig.follow(walkAim)
 }
 

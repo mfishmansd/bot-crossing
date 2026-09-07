@@ -653,6 +653,8 @@ export class Astronauts {
        */
       floorY: null,
       bounds: null,
+      /** Lean, in radians about the body's own X: zero on the ground, most of a right angle flying. */
+      pitch: 0,
       hop: 0,
       /** Vertical speed, only ever non-zero while somebody is hopping this one about. */
       hopVel: 0,
@@ -1012,6 +1014,12 @@ export class Astronauts {
     // a jetpack in a room that size is a way of hitting it.
     const thrusting = Boolean(input.thrust) && airborne && !agent.bounds
     agent.thrusting = thrusting
+    // Flying is done lying down. Moving under thrust the body tips most of the way to flat,
+    // hovering it only leans; on the ground it is upright, and the transition is eased
+    // both ways because a body that snaps flat is a body that has been knocked over.
+    const moving = Math.hypot(agent.vel.x, agent.vel.z) > 1.5
+    const lean = thrusting ? (moving ? 1.25 : 0.4) : 0
+    agent.pitch = THREE.MathUtils.damp(agent.pitch, lean, 5, dt)
     // Flying is fast, and it is steerable — a jetpack you cannot point is a rocket.
     const want = len > 0.001 ? DRIVE_SPEED * (input.run || thrusting ? DRIVE_RUN : 1) : 0
 
@@ -1099,6 +1107,7 @@ export class Astronauts {
     agent.driven = false
     agent.input = null
     agent.thrusting = false
+    agent.pitch = 0
     agent.hop = 0
     agent.hopVel = 0
     // Whatever else letting go means, it means back on the planet: an astronaut released
@@ -1516,7 +1525,7 @@ export class Astronauts {
 
       // Root transform for the whole character. The rig is authored at 2.2 units tall, so
       // CREW_SCALE rides along here and everything downstream inherits it.
-      e.set(0, agent.yaw, 0)
+      e.set(agent.pitch, agent.yaw, 0, 'YXZ')
       q.setFromEuler(e)
       v.set(agent.pos.x, agent.pos.y, agent.pos.z)
       root.compose(v, q, one.setScalar(s * CREW_SCALE))
@@ -1549,6 +1558,13 @@ export class Astronauts {
           _cv.set(0, P.packUp, P.packZ - P.helmetR * 0.275 - 0.006)
           this.logo.matrix.compose(_cv, _cq, _cs).premultiply(worn)
           this.logo.visible = true
+          // Where the jet comes out — the bottom of the pack — and which way it goes, which
+          // is the body's own downward. Both in world space, so whoever draws the flames
+          // needs to know nothing about bones.
+          const ex = agent.exhaust || (agent.exhaust = new THREE.Vector3())
+          const ed = agent.exhaustDir || (agent.exhaustDir = new THREE.Vector3())
+          ex.set(0, P.packUp - P.helmetR * 0.49, P.packZ).applyMatrix4(worn)
+          ed.set(0, -1, 0).applyQuaternion(q)
         }
         setPart(child, worn, lamp, i, 0, P.lightY, P.lightZ, 0, 0, 0)
 
