@@ -721,6 +721,14 @@ export class CommandDeck {
     this.consoleTexture.needsUpdate = true
   }
 
+  /** The panel a repo is on, or -1. */
+  panelOf(project) {
+    for (let i = 0; i < this._byPanel.length; i++) {
+      if (this._byPanel[i] && this._byPanel[i].project === project) return i
+    }
+    return -1
+  }
+
   /** What a panel is showing, or null for a dark one. */
   entryAt(panel) {
     return panel >= 0 ? this._byPanel[panel] || null : null

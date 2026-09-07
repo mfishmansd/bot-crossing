@@ -507,6 +507,8 @@ let deckCandidateFrames = 0
  */
 const SWEEP_DAYS = 30
 const SWEEP_MS = SWEEP_DAYS * 24 * 60 * 60 * 1000
+/** The find-a-repo query while one is being typed aboard, or null. */
+let deckSearch = null
 /** A sweep waiting for its second press: what it would archive, and when it was offered. */
 let sweepArmed = null
 /** The threads the last sweep archived, so U can put them back. */
@@ -637,7 +639,7 @@ function updateDeckFacing() {
   // loader the surface boards use, so a repo you have already stood near costs nothing.
   readmeFor(pathForProject(entry.project), entry.project)
   colony.deck.setConsole(colony.consoleFor(entry.project))
-  hud.hint(`${entry.project} · [ ] pick · Enter opens · A archive · C new · X sweep idle · F folder · N next · E leave`)
+  hud.hint(`${entry.project} · [ ] pick · Enter opens · A archive · C new · X sweep idle · F folder · N next · / find · E leave`)
 }
 
 /**
@@ -789,12 +791,58 @@ async function undoSweep() {
   hud.toast(back.length === list.length ? `Restored ${back.length}` : `Restored ${back.length} of ${list.length}`)
 }
 
+/**
+ * Find a repo by name, aboard. `/` opens it; every keystroke turns you to the first repo
+ * whose name starts with what you have typed, then the first that contains it; Enter
+ * keeps it, Esc lets it go. A hundred and seventy panels is a wall you read; this is one
+ * you ask.
+ */
+function applyDeckSearch() {
+  const q = deckSearch.toLowerCase()
+  let match = null
+  if (q) {
+    const names = colony.plotOrder.map((p) => p.id)
+    match = names.find((n) => n.toLowerCase().startsWith(q)) || names.find((n) => n.toLowerCase().includes(q)) || null
+  }
+  if (match) {
+    const panel = colony.deck.panelOf(match)
+    if (panel >= 0) rig.turnTo(colony.deck.panelCenter(panel, _hatch))
+  }
+  hud.hint(`find: ${deckSearch}▏ ${q ? (match ? '→ ' + match : '— no match') : ''}`)
+}
+
+/** Keys while a search is open. Returns true if the key was the search's to keep. */
+function deckSearchKey(e) {
+  if (e.key === 'Escape') {
+    deckSearch = null
+    hud.hint('Find cancelled')
+    return true
+  }
+  if (e.key === 'Enter') {
+    deckSearch = null
+    hud.hint('Found · look around, or / to find another')
+    return true
+  }
+  if (e.key === 'Backspace') {
+    deckSearch = deckSearch.slice(0, -1)
+    applyDeckSearch()
+    return true
+  }
+  if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    deckSearch += e.key
+    applyDeckSearch()
+    return true
+  }
+  return false
+}
+
 /** Aboard, or back out. The camera is snapped rather than flown; the deck is a long way down. */
 function toggleAboard() {
   if (!walkingId) return
   if (colony.aboard) {
     const agent = colony.leaveShip()
     if (agent) {
+      deckSearch = null
       deckFacing = deckCandidate = -1
       colony.deck.setFocused(-1)
       select(walkingId, {})
@@ -959,6 +1007,20 @@ window.addEventListener('keydown', (e) => {
   // Walking, the movement keys are the movement keys. `S` is the settings panel on the map
   // and "back" on the deck, and there is no reading of that which lets both have it.
   const key = e.key.toLowerCase()
+  // A find in progress owns the keyboard: the letters you type are a name, not a walk.
+  if (colony.aboard && deckSearch !== null) {
+    if (deckSearchKey(e)) {
+      e.preventDefault()
+      return
+    }
+  }
+  if (colony.aboard && key === '/') {
+    e.preventDefault()
+    deckSearch = ''
+    applyDeckSearch()
+    return
+  }
+
   if (walkingId && key === 'e') {
     e.preventDefault()
     toggleAboard()
