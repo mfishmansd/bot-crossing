@@ -655,6 +655,8 @@ export class Astronauts {
       bounds: null,
       /** Lean, in radians about the body's own X: zero on the ground, most of a right angle flying. */
       pitch: 0,
+      /** Standing on a building rather than the ground. The nav grid does not apply up there. */
+      onRoof: false,
       hop: 0,
       /** Vertical speed, only ever non-zero while somebody is hopping this one about. */
       hopVel: 0,
@@ -939,7 +941,33 @@ export class Astronauts {
       if (agent.groundAt === null || Math.abs(agent.pos.x - agent.groundX) + Math.abs(agent.pos.z - agent.groundZ) > 0.2) {
         agent.groundX = agent.pos.x
         agent.groundZ = agent.pos.z
-        agent.groundAt = ground(agent.pos.x, agent.pos.z)
+        let at = ground(agent.pos.x, agent.pos.z)
+
+        // Roofs, for the one astronaut that can get onto one. The world says whether there
+        // is a building top under this point that you are high enough to land on.
+        agent.onRoof = false
+        if (agent.driven && this.world.roofAt) {
+          const here = (agent.groundY === null ? at : agent.groundY) + agent.hop
+          const roof = this.world.roofAt(agent.pos.x, agent.pos.z, here)
+          if (roof !== null && roof > at) {
+            at = roof
+            agent.onRoof = true
+          }
+        }
+
+        // When the ground changes under the astronaut you are flying, its height above the
+        // world must not. Coming down onto a roof, the reference rises and the hop shrinks
+        // by the same amount, so you keep falling to the roof rather than being lifted to
+        // it. Walking off the roof's edge, the reference drops and the difference becomes a
+        // hop with no upward speed, which is to say a fall. Stepping *up* onto a deck keeps
+        // the easing below, because a step is not a fall in reverse.
+        if (agent.driven && agent.groundAt !== null && at !== agent.groundAt && (agent.hop > 0 || at < agent.groundAt - 0.5)) {
+          const above = agent.groundY + agent.hop
+          agent.groundY = at
+          agent.hop = Math.max(0, above - at)
+          if (agent.hop > 0 && agent.hopVel === 0) agent.hopVel = -0.01
+        }
+        agent.groundAt = at
       }
       // Eased, so walking up onto a deck is a step rather than a teleport. Snapped outright
       // on the first frame, or a spawning astronaut rises out of the floor.
@@ -1046,10 +1074,11 @@ export class Astronauts {
         agent.pos.x = agent.bounds.x + (bx / d) * agent.bounds.r
         agent.pos.z = agent.bounds.z + (bz / d) * agent.bounds.r
       }
-    } else if (this.nav && agent.hop <= FLY_CLEAR) {
+    } else if (this.nav && agent.hop <= FLY_CLEAR && !agent.onRoof) {
       // `solidOnly`: buildings and the ship stop you, ground clutter and scatter do not.
       // And past FLY_CLEAR neither does the grid: it is a map of what is on the ground,
-      // and you are not.
+      // and you are not — nor are you on a roof, which is inside a building's own cells
+      // and would have the grid shove you off it.
       if (!this.nav.slide(agent.pos, dx, dz, false, true)) agent.vel.multiplyScalar(0.35)
     } else {
       agent.pos.x += dx

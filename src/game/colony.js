@@ -489,7 +489,33 @@ export class Colony {
     return {
       shipDoor: () => this.ship.shipDoor(),
       groundAt: (x, z) => this.groundAt(x, z),
+      roofAt: (x, z, y) => this.roofAt(x, z, y),
     }
+  }
+
+  /**
+   * The roof under a point, if there is one and you are high enough to land on it: a
+   * building's top, for a point inside its footprint, when `y` is not below that top by
+   * more than a step. The last condition is what keeps this a landing and never a climb —
+   * walking into a habitat's footprint at ground level does not put you on its roof; the
+   * nav grid stops you at the wall exactly as it always did. Only the astronaut you are
+   * flying ever asks, so the walk over every building is a cost paid once a frame, for one.
+   */
+  roofAt(x, z, y) {
+    let best = null
+    for (const entry of this.buildings.values()) {
+      if (entry.retiring) continue
+      const p = entry.mesh.position
+      const r = (entry.mesh.userData.footprint || 1.2) * 0.9
+      const dx = x - p.x
+      const dz = z - p.z
+      if (dx * dx + dz * dz > r * r) continue
+      // A building still going up is as tall as it has got so far.
+      const top = p.y + Math.max(0.6, (entry.mesh.userData.height || 1) * entry.progress)
+      if (y < top - 0.35) continue
+      if (best === null || top > best) best = top
+    }
+    return best
   }
 
   groundAt(x, z) {

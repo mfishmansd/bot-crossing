@@ -445,6 +445,18 @@ along the body's own downward, so it points at the ground while you climb and st
 behind you once you are flat. There is no jetpack aboard the ship: the deck has a ceiling a
 body-length overhead, and a jetpack in a room that size is a way of hitting it.
 
+### Landing on roofs
+
+Fly over a habitat, let go, and you land on it rather than sinking through to the ground.
+The height an astronaut stands at comes from the terrain, or a plot's deck; for the one you
+are flying it now also asks whether there is a building top under it that it is high
+enough to land on — and only high enough, so walking into a habitat's footprint at ground
+level still stops you at the wall. When the ground changes under you, your height above
+the world does not: coming down onto a roof shrinks the hop by what the roof adds, so you
+keep falling to it rather than being lifted; walking off its edge turns the difference into
+a fall. On a roof the nav grid is switched off, because a roof is inside a building's own
+cells and the grid would shove you off it.
+
 ### Wearing your own badge
 
 The astronaut you are wearing carries a mark on its pack. It is one ordinary mesh moved to
