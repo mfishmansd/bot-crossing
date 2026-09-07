@@ -1524,8 +1524,12 @@ body {
 }
 
 .help .sheet {
-  width: min(560px, calc(100vw - 40px));
+  width: min(840px, calc(100vw - 40px));
   padding: 22px 24px;
+  /* It has to fit on the screen it is opened on, and it is not the sheet's business what
+     size that is: past this it scrolls inside itself rather than off the bottom. */
+  max-height: calc(100vh - 40px);
+  overflow: auto;
 }
 
 .help h2 {
@@ -1542,8 +1546,24 @@ body {
 
 .help .cols {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 4px 26px;
+}
+
+.help .cols h3 {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+@media (max-width: 760px) {
+  .help .cols {
+    grid-template-columns: 1fr;
+  }
 }
 
 .help .k {
@@ -1551,7 +1571,7 @@ body {
   justify-content: space-between;
   gap: 14px;
   align-items: baseline;
-  padding: 5px 0;
+  padding: 3px 0;
   font-size: 13px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
@@ -1574,11 +1594,17 @@ kbd {
   white-space: nowrap;
 }
 
+.help .legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 26px;
+}
+
 .help .legend-row {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 5px 0;
+  padding: 3px 0;
   font-size: 13px;
   color: var(--muted);
 }

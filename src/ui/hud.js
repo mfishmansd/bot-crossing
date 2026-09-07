@@ -559,6 +559,12 @@ export class Hud {
   setWalking(name) {
     this.walking = Boolean(name)
     this.$('.walkbar').classList.toggle('on', this.walking)
+    // Selection has already put the card up by the time this runs; take it down now rather
+    // than on the next frame, so there is never a frame with it pinned to your own back.
+    if (this.walking) {
+      this.$('.thread-pop').classList.remove('on')
+      this._cardOn = false
+    }
     this.$('#btn-walk').setAttribute('aria-pressed', String(this.walking))
     if (name) this.$('.walkbar .who b').textContent = name
   }
@@ -683,7 +689,11 @@ export class Hud {
    */
   placeCard(screen) {
     const el = this.$('.thread-pop')
-    if (!screen || !this.selected) {
+    // Not while walking. Taking an astronaut selects it, and selection puts its card beside
+    // it — which, for the one you are wearing, is a card pinned to the middle of your own
+    // view describing you. The walk bar already says whose thread this is; the sidebar
+    // keeps the rest. The selection itself stays, so letting go hands everything back.
+    if (!screen || !this.selected || this.walking) {
       if (this._cardOn) {
         this._cardOn = false
         el.classList.remove('on')
@@ -1066,43 +1076,48 @@ const TEMPLATE = `
 <div class="help">
   <div class="sheet panel">
     <h2>Bot Crossing</h2>
-    <p class="sub">Every coding-agent thread on this Mac is an astronaut. They walk out of the ship, claim a plot for their repo, and build. Click one to open its thread; click a zone — its deck or its name — for the repo itself, and start a new conversation there. Navigation works like Google Earth — drag the ground itself, right-drag to tilt, scroll to zoom in on whatever is under the cursor. Or press <kbd>G</kbd> and walk it: the ship's command deck is a wall of every repo, and the keys below work in there on whichever one you are looking at.</p>
+    <p class="sub">Every coding-agent thread on this Mac is an astronaut: it walks out of the ship, claims a plot for its repo, and builds. Click one for its thread, click a zone for the repo. Navigate like Google Earth, or press <kbd>G</kbd> and walk it — the ship's command deck is a wall of every repo, and the deck keys act on whichever one you are looking at.</p>
     <div class="cols">
       <div>
+        <h3>Getting around</h3>
         <div class="k"><span>Drag the ground</span><kbd>drag</kbd></div>
         <div class="k"><span>Tilt &amp; rotate</span><kbd>right-drag</kbd></div>
         <div class="k"><span>&nbsp;</span><kbd>⌃ or ⇧ + drag</kbd></div>
         <div class="k"><span>Zoom to cursor</span><kbd>scroll</kbd></div>
         <div class="k"><span>Move / zoom</span><kbd>arrows</kbd> <kbd>+ −</kbd></div>
         <div class="k"><span>Reset view</span><kbd>0</kbd></div>
+        <div class="k"><span>Orbit mode</span><kbd>O</kbd></div>
+        <div class="k"><span>Change planet</span><kbd>Tab</kbd></div>
+        <div class="k"><span>Time of day</span><kbd>L</kbd></div>
         <div class="k"><span>Hide all UI</span><kbd>H</kbd> <kbd>${IS_MAC ? '⌘' : 'Ctrl'}\\</kbd></div>
         <div class="k"><span>Settings</span><kbd>S</kbd></div>
         <div class="k"><span>Screenshot</span><kbd>P</kbd></div>
       </div>
       <div>
+        <h3>Threads and repos</h3>
         <div class="k"><span>Next needing you</span><kbd>N</kbd></div>
         <div class="k"><span>Open thread</span><kbd>Enter</kbd></div>
         <div class="k"><span>Archive</span><kbd>A</kbd></div>
         <div class="k"><span>New conversation</span><kbd>C</kbd></div>
         <div class="k"><span>What is this place?</span><kbd>R</kbd></div>
+        <div class="k"><span>Deselect</span><kbd>Esc</kbd></div>
+        <div class="k"><span>Sound on / off</span><kbd>M</kbd></div>
+        <div class="k"><span>This sheet</span><kbd>?</kbd></div>
+      </div>
+      <div>
+        <h3>Walking and the deck</h3>
         <div class="k"><span>Walk as an astronaut</span><kbd>G</kbd></div>
         <div class="k"><span>Fly, while walking</span><kbd>hold space</kbd></div>
         <div class="k"><span>Board the ship, at its ramp</span><kbd>E</kbd></div>
-        <div class="k"><span>Aboard: select a repo</span><kbd>look at it</kbd></div>
-        <div class="k"><span>Aboard: pick within its queue</span><kbd>[</kbd> <kbd>]</kbd></div>
-        <div class="k"><span>Aboard: find a repo by name</span><kbd>/</kbd></div>
-        <div class="k"><span>Aboard: archive the idle</span><kbd>X</kbd> <kbd>U</kbd></div>
-        <div class="k"><span>Aboard: open its folder</span><kbd>F</kbd></div>
-        <div class="k"><span>Aboard: step out onto that repo</span><kbd>T</kbd></div>
-        <div class="k"><span>Sound on / off</span><kbd>M</kbd></div>
-        <div class="k"><span>Orbit mode</span><kbd>O</kbd></div>
-        <div class="k"><span>Change planet</span><kbd>Tab</kbd></div>
-        <div class="k"><span>Time of day</span><kbd>L</kbd></div>
-        <div class="k"><span>Deselect</span><kbd>Esc</kbd></div>
-        <div class="k"><span>This sheet</span><kbd>?</kbd></div>
+        <div class="k"><span>Select a repo</span><kbd>look at it</kbd></div>
+        <div class="k"><span>Pick within its queue</span><kbd>[</kbd> <kbd>]</kbd></div>
+        <div class="k"><span>Find a repo by name</span><kbd>/</kbd></div>
+        <div class="k"><span>Archive the idle · undo</span><kbd>X</kbd> <kbd>U</kbd></div>
+        <div class="k"><span>Open its folder</span><kbd>F</kbd></div>
+        <div class="k"><span>Step out onto that repo</span><kbd>T</kbd></div>
       </div>
     </div>
-    <div style="margin-top:16px">
+    <div class="legend" style="margin-top:14px">
       <div class="legend-row"><i class="badge" style="background:#1a2b46;color:#8fb4ee">?</i> waiting on your reply — click to open the thread</div>
       <div class="legend-row"><i class="badge" style="background:#3d1c1c;color:#e88b8b">!</i> the session hit an error</div>
       <div class="legend-row"><i class="badge" style="background:#16301f;color:#7fd39a">⚒</i> running right now, building</div>
