@@ -26,6 +26,7 @@
  * concessions `claude-code.mjs` already makes for threads started from a terminal.
  */
 import fsp from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { exists, jsonLines, listDirs, listFiles, readHead } from '../lib/fsutil.mjs'
@@ -375,14 +376,38 @@ async function scanThreads() {
  * pretend otherwise. What it can do is put you back where the thread was working, which is
  * the closest true thing to handing it back. `newSession` below does exactly the same,
  * because for this harness they really are the same action.
+ *
+ * How the folder is opened matters more than it looks. `cursor://file/<dir>` is the
+ * scheme's documented shape and it does bring the app to the front — and then opens
+ * nothing, or whatever window was already there, because the handler is built for files.
+ * The command line does what the scheme claims to: `cursor <dir>` opens that folder as a
+ * workspace, in a new window if it is not already open, in the existing one if it is. So
+ * that is used wherever it can be found, `open -a` on a Mac stands in when it cannot, and
+ * the URL is the last resort rather than the first.
  */
 function openThread(ref) {
   const dir = ref?.cwd
   if (!dir) return { ok: false, error: 'That thread has no workspace left on disk' }
-  return { ok: true, url: fileUrl(dir) }
+  return openFolder(dir)
 }
 
 function newSession(dir) {
+  return openFolder(dir)
+}
+
+/** Where Cursor's command line usually lives, most reliable first. */
+const CURSOR_CLI = [
+  '/usr/local/bin/cursor',
+  '/Applications/Cursor.app/Contents/Resources/app/bin/cursor',
+  path.join(HOME, 'AppData', 'Local', 'Programs', 'cursor', 'resources', 'app', 'bin', 'cursor.cmd'),
+  '/usr/bin/cursor',
+  '/snap/bin/cursor',
+]
+
+function openFolder(dir) {
+  const cli = CURSOR_CLI.find((p) => existsSync(p))
+  if (cli) return { ok: true, command: [cli, dir] }
+  if (process.platform === 'darwin') return { ok: true, command: ['open', '-a', 'Cursor', dir] }
   return { ok: true, url: fileUrl(dir) }
 }
 
