@@ -639,7 +639,7 @@ function updateDeckFacing() {
   // loader the surface boards use, so a repo you have already stood near costs nothing.
   readmeFor(pathForProject(entry.project), entry.project)
   colony.deck.setConsole(colony.consoleFor(entry.project))
-  hud.hint(`${entry.project} · [ ] pick · Enter opens · A archive · C new · X sweep idle · F folder · N next · / find · E leave`)
+  hud.hint(`${entry.project} · T step out onto it · [ ] pick · Enter opens · A archive · C new · X sweep · F folder · N next · / find · E leave`)
 }
 
 /**
@@ -848,27 +848,50 @@ function deckSearchKey(e) {
  * Every way off the deck goes through here, so the colony file always knows when you were
  * last aboard — which is what "since your last visit" is measured from next time.
  */
-function leaveDeck() {
+function leaveDeck(at = null) {
   state.lastDeckVisit = Date.now()
   queueSave()
-  return colony.leaveShip()
+  return colony.leaveShip(at)
+}
+
+/**
+ * Step off the deck — at the ramp, or wherever `at` says — and put the page back the way
+ * the surface expects it. One routine for both, so a teleport can never leave behind a
+ * piece of deck state the ramp would have cleared.
+ */
+function disembark(at, hint) {
+  const agent = leaveDeck(at)
+  if (!agent) return
+  deckSearch = null
+  deckFacing = deckCandidate = -1
+  colony.deck.setFocused(-1)
+  select(walkingId, {})
+  rig.setInterior(null)
+  rig.snapTo(agent.pos)
+  engine.setFocusScale(0.3)
+  hud.hint(hint)
+}
+
+/** T, aboard: out of the ship and onto the repo you are looking at. */
+function teleportToFacing() {
+  const entry = colony.deck.entryAt(deckFacing)
+  if (!entry) {
+    hud.hint('Look at a repo first')
+    return
+  }
+  const at = colony.landingFor(entry.project)
+  if (!at) {
+    hud.hint(`${entry.project} has no zone to land on`)
+    return
+  }
+  disembark(at, `${entry.project} · E at the ramp to go back aboard`)
 }
 
 /** Aboard, or back out. The camera is snapped rather than flown; the deck is a long way down. */
 function toggleAboard() {
   if (!walkingId) return
   if (colony.aboard) {
-    const agent = leaveDeck()
-    if (agent) {
-      deckSearch = null
-      deckFacing = deckCandidate = -1
-      colony.deck.setFocused(-1)
-      select(walkingId, {})
-      rig.setInterior(null)
-      rig.snapTo(agent.pos)
-      engine.setFocusScale(0.3)
-      hud.hint('Back on the surface · E at the ramp to go aboard again')
-    }
+    disembark(null, 'Back on the surface · E at the ramp to go aboard again')
     return
   }
   const agent = colony.astronauts.driven
@@ -1074,6 +1097,11 @@ window.addEventListener('keydown', (e) => {
     if (key === '[' || key === ']') {
       e.preventDefault()
       moveDeckPick(key === '[' ? -1 : 1)
+      return
+    }
+    if (key === 't') {
+      e.preventDefault()
+      teleportToFacing()
       return
     }
     if (e.key === 'Enter' || key === 'a') {

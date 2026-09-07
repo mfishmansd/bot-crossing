@@ -1078,6 +1078,7 @@ const TEMPLATE = `
         <div class="k"><span>Aboard: find a repo by name</span><kbd>/</kbd></div>
         <div class="k"><span>Aboard: archive the idle</span><kbd>X</kbd> <kbd>U</kbd></div>
         <div class="k"><span>Aboard: open its folder</span><kbd>F</kbd></div>
+        <div class="k"><span>Aboard: step out onto that repo</span><kbd>T</kbd></div>
         <div class="k"><span>Orbit mode</span><kbd>O</kbd></div>
         <div class="k"><span>Change planet</span><kbd>Tab</kbd></div>
         <div class="k"><span>Time of day</span><kbd>L</kbd></div>

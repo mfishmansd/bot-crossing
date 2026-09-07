@@ -294,6 +294,7 @@ under **View → Return to isometric**.
 | `/` | Aboard: find a repo by name — every keystroke turns you to the first match |
 | `X` / `U` | Aboard: archive everything idle over thirty days in the facing repo, or in the colony from the dashboard. Two presses; `U` undoes the last sweep |
 | `F` | Aboard: reveal the facing repo's folder |
+| `T` | Aboard: step out of the ship onto the repo you are looking at |
 | `O` | Orbit mode |
 | `Tab` | Next planet |
 | `L` | Next time of day |
@@ -549,6 +550,11 @@ sidebar's button writes, one thread at a time through the same call, and that ca
 boolean, so `U` puts the last sweep back.
 
 **Open the folder.** `F` reveals the facing repo in Finder — the sidebar's button, as a key.
+
+**Step out onto it.** `T`, and you leave the ship standing in the middle of the repo you
+were looking at, camera arriving with you. The deck is the one place that knows every repo
+at once, so board, find one by name, and step out: that is the shortest route across the
+colony there is.
 
 ### Since your last visit
 

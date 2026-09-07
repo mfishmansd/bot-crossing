@@ -662,14 +662,27 @@ export class Colony {
     return agent
   }
 
-  /** Back out at the foot of the ramp, which is where astronauts always come and go. */
-  leaveShip() {
+  /**
+   * Back out — at the foot of the ramp, where astronauts always come and go, or anywhere
+   * you name. The deck is the one place that knows every repo at once, so stepping out of
+   * it straight onto the one you were looking at is the shortest route across the colony
+   * there is.
+   */
+  leaveShip(at = null) {
     if (!this.aboard) return null
     this.aboard = false
     this.deck.setConsole(null)
     this.deck.setAboard(false)
-    const door = this.ship.shipDoor()
-    return this.astronauts.leaveInterior(door)
+    const spot = at || this.ship.shipDoor()
+    return this.astronauts.leaveInterior(spot)
+  }
+
+  /** Where you land if you step out of the ship onto a repo: the middle of its zone. */
+  landingFor(project) {
+    const plot = this.plots.get(project)
+    if (!plot) return null
+    const p = plot.middle || plot.center
+    return { x: p.x, y: 0, z: p.z }
   }
 
   /**
