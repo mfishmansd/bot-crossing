@@ -288,7 +288,8 @@ under **View → Return to isometric**.
 | `Enter` / `A` | Open / archive the selected thread |
 | `C` | New conversation in the open zone's folder |
 | `R` | Ask the selected astronaut what the repo it is standing on is |
-| `G` | Walk as an astronaut. `WASD` to move, `⇧` to run, `space` to hop, `Esc` to let go |
+| `G` | Walk as an astronaut. `WASD` to move, `⇧` to run, `space` to hop — hold it to fly — `Esc` to let go |
+| `E` | At the ship's ramp, go aboard the command deck; again to step back out. Aboard, `N` turns you to the next repo that needs you, and `Enter` / `A` / `C` act on the repo you are looking at |
 | `O` | Orbit mode |
 | `Tab` | Next planet |
 | `L` | Next time of day |
@@ -328,6 +329,13 @@ compass would have you pressing different keys to walk the same way. And the **t
 turned down to a third**: the shallow focus is what makes the colony read as a model on a
 table, and it is exactly what you do not want from inside it, where the plane of focus sits
 a few metres out and everything past it is fog.
+
+A third thing changes on the way down, and it is the one you would only notice if it
+did not: the zone name plates. On the map they are labels drawn over everything, so a habitat
+between you and a name can never cut it in half. From the ground the same rule paints the
+name of the zone behind you across the back of your own helmet, so walking, the plates take
+their place in the world and are covered by whatever stands in front of them — which is
+what a sign is. Letting go hands them back to the map.
 
 A thread that gets archived, or drops out of a scan, takes its astronaut back — you land on
 the map with a note saying so, rather than following a ghost.
@@ -401,6 +409,125 @@ the same reach the navigable grid is sized by, so the two can never disagree abo
 colony is. It is module state rather than a value handed around, because the displaced mesh
 and the samplers that sit the ship, the plots and the scatter on top of it have to agree to
 the millimetre — and the symptom of their disagreeing is a colony that floats.
+
+### Hold space to fly
+
+A tap of `space` is the hop above. Held, it keeps you climbing: net lift is the pack's
+thrust less the moon's gravity, so the climb builds instead of snapping, capped so a long
+hold is a climb and not a launch. You are over the roofs in a little under a second, at the
+ceiling in about eleven, and it is a five second fall back if you let go up there.
+
+Two things change in the air once the pack is lit, and both are about control. The hop's
+drift — the keys barely arguing while you are up — is the hop's character and would make a
+jetpack unsteerable, so under thrust the keys win again and you move at running speed: a
+jetpack you cannot point is a rocket. And past clearing height the nav grid stops applying,
+because it is a map of what is on the ground and you are not — you cannot walk through a
+habitat, but you can very much fly over one.
+
+Flying is done lying down. Moving under thrust the body tips most of the way to flat, head
+forward; hovering it only leans; on the ground it is upright, eased both ways because a body
+that snaps flat is a body that has been knocked over. The lean is a pitch on the root
+transform about the body's own axis, after the yaw, so it is always along the way you are
+facing and every worn part comes with it for free.
+
+The flame out of the pack is two populations of particles, because of what the particle
+pool is: a particle's size is fixed for its life and the blend is additive, so a flame is
+nothing but overlap, and same-sized particles born at one point and moving apart overlap
+for a frame and never again. The body is a few big, nearly stationary points at the nozzle
+that live for a handful of frames — white-yellow, pushed past one for the bloom. The tail is
+smaller, longer-lived ones born along the jet, shrinking and reddening as they go. It leaves
+along the body's own downward, so it points at the ground while you climb and streams out
+behind you once you are flat. There is no jetpack aboard the ship: the deck has a ceiling a
+body-length overhead, and a jetpack in a room that size is a way of hitting it.
+
+### Wearing your own badge
+
+The astronaut you are wearing carries a mark on its pack. It is one ordinary mesh moved to
+the right pack each frame rather than a texture on every pack, because exactly one
+astronaut ever wears it — teaching four hundred packs to sample an atlas so one can show a
+logo is the wrong trade.
+
+The artwork comes from `public/assets/local/`, which is gitignored: put a square-ish SVG or
+PNG there as `privion-mark.svg` (or point `setLogo` at your own file in `main.js`) and it
+is fitted to the pack with a margin and its own ratio kept. Nothing in that folder is ever
+committed — the marks in there are yours and this repository is public — and a fresh clone
+sees a plain **P** and nothing breaks.
+
+## The command deck
+
+Walk to the foot of the ship's ramp and press `E`. You are on the command deck: a round
+room walled floor to ceiling in screens, lit by nothing but them, one panel per repo. `E`
+again puts you back at the ramp.
+
+### It is not inside the hull
+
+The ship is a little over three units across and an astronaut is one and a quarter tall,
+so the inside of the model is a broom cupboard: a room that fits in there is a room you
+cannot turn around in, and every wall of it fights the exterior geometry for the same
+space. The deck is built once, six hundred units under the world, and going aboard moves
+you to it. The room is sealed and the colony is far past the fog, so there is nothing to
+see out of and nothing to clip against — the two things that make interiors expensive
+both stop applying. You board by keypress at the ramp rather than by climbing it, because
+an astronaut's height comes from the terrain and the ramp is not terrain: walking up it is
+a physics problem of its own.
+
+Three seams had to give for an astronaut to stand somewhere that is not the planet. Its
+height came from the terrain sampler, which is defined everywhere and so does not fail six
+hundred units down — it quietly returns a hillside and drops you through the deck; an
+agent may now carry a floor of its own. Its walls came from the nav grid, sized for a
+colony a hundred times wider than this room; a round room needs a circle and one hypot.
+And the camera trails its target on purpose, which is right for somebody walking and wrong
+for somebody who appears, so it can now be snapped — and, indoors, it keeps itself inside
+the shell by shortening its own leash when a wall is behind it, the way third-person
+cameras always have, rather than by shrinking the room you may walk in.
+
+### One panel per repo
+
+A thread is the wrong unit for a wall. There are four hundred of them against a hundred and
+eighty panels, they come and go as sessions open and close, and a panel whose meaning
+changes underneath you is one whose position you can never learn. A repo is stable, there
+are fewer of them than panels, and it is the thing you actually think in. Each panel shows
+the repo's name, how many threads it holds, and only the states worth naming — stuck,
+needing you, running — with the worst thread's own title as the one sentence saying why
+the repo is lit. The panel takes the colour of the worst thing happening in it, in the
+astronauts' own trim palette: a second vocabulary for the same six states is how you build
+a dashboard nobody can parse.
+
+It is counted off the threads and not off the crew, and that is worth knowing. The
+astronaut pool is the *Max crew* slider in Settings — ninety on the medium preset, two
+hundred at most — and the roster fills it busiest repo first, so the crew on the surface is
+a sample of the colony rather than the whole of it; rolled up from astronauts the wall
+showed eleven repos out of a hundred and seventy-one and looked for all the world like a
+rendering bug. Two thirds of a real projects directory
+is asleep at any moment, and sleeping is drawn quiet rather than dark: a sleeping repo is
+still a repo you own.
+
+The hundred and eighty panels are one instanced mesh and one draw call, by the trick the
+crew's sixteen faces already use — every panel samples one atlas and a per-instance offset
+picks its cell. The cell's ratio is the panel's own to within two thousandths, because the
+first version was not, and eighteen per cent of stretch is the first thing you see in a
+monospace face. Repos are dealt out in plot order, so a repo sits in the same place on the
+wall as it does in the layout and the sidebar, and from eye level outwards, so the busiest
+are in front of you and the quiet tail is overhead and underfoot.
+
+### Looking at a panel is selecting it
+
+The middle of the view is a pointer. Whichever panel it rests on is the selected repo: the
+sidebar follows exactly as it follows a click on a zone, the panel holds bright and still,
+and the keys you already know act on what you are looking at — `Enter` opens the thread
+that most needs you there, `C` starts a new one in that repo, `A` archives, and `N` turns
+you to the next panel that wants you instead of flying the camera off the deck. The room
+never grows a second way of doing anything; it is another way of pointing. Selection has a
+dead zone measured in frames rather than degrees, so a drag across the wall does not change
+the sidebar forty times on its way past.
+
+### The console
+
+The wall says what every repo is doing. The console over the plinth says what the one you
+are facing *is*: its readme's own title and first sentence — the same answer `R` gives on
+the map, from the same loader and the same cache — and its threads listed worst first,
+which is the queue `Enter` works through. It turns to face you on the yaw axis only, like
+the boards on the surface: readable from anywhere in the room and never appearing to move.
 
 ## Planets and light
 

@@ -1039,6 +1039,7 @@ const TEMPLATE = `
     <kbd>⇧</kbd> run
     <kbd>space</kbd> hop · hold to fly
     <kbd>drag</kbd> look
+    <kbd>E</kbd> aboard, at the ramp
   </span>
   <button class="btn" id="btn-walk-stop">Let go <kbd>Esc</kbd></button>
 </div>
@@ -1050,7 +1051,7 @@ const TEMPLATE = `
 <div class="help">
   <div class="sheet panel">
     <h2>Bot Crossing</h2>
-    <p class="sub">Every coding-agent thread on this Mac is an astronaut. They walk out of the ship, claim a plot for their repo, and build. Click one to open its thread; click a zone — its deck or its name — for the repo itself, and start a new conversation there. Navigation works like Google Earth — drag the ground itself, right-drag to tilt, scroll to zoom in on whatever is under the cursor.</p>
+    <p class="sub">Every coding-agent thread on this Mac is an astronaut. They walk out of the ship, claim a plot for their repo, and build. Click one to open its thread; click a zone — its deck or its name — for the repo itself, and start a new conversation there. Navigation works like Google Earth — drag the ground itself, right-drag to tilt, scroll to zoom in on whatever is under the cursor. Or press <kbd>G</kbd> and walk it: the ship's command deck is a wall of every repo, and the keys below work in there on whichever one you are looking at.</p>
     <div class="cols">
       <div>
         <div class="k"><span>Drag the ground</span><kbd>drag</kbd></div>
@@ -1070,6 +1071,9 @@ const TEMPLATE = `
         <div class="k"><span>New conversation</span><kbd>C</kbd></div>
         <div class="k"><span>What is this place?</span><kbd>R</kbd></div>
         <div class="k"><span>Walk as an astronaut</span><kbd>G</kbd></div>
+        <div class="k"><span>Fly, while walking</span><kbd>hold space</kbd></div>
+        <div class="k"><span>Board the ship, at its ramp</span><kbd>E</kbd></div>
+        <div class="k"><span>Aboard: select a repo</span><kbd>look at it</kbd></div>
         <div class="k"><span>Orbit mode</span><kbd>O</kbd></div>
         <div class="k"><span>Change planet</span><kbd>Tab</kbd></div>
         <div class="k"><span>Time of day</span><kbd>L</kbd></div>
