@@ -495,8 +495,8 @@ a dashboard nobody can parse.
 
 It is counted off the threads and not off the crew, and that is worth knowing. The
 astronaut pool is the *Max crew* slider in Settings — ninety on the medium preset, two
-hundred at most — and the roster fills it busiest repo first, so the crew on the surface is
-a sample of the colony rather than the whole of it; rolled up from astronauts the wall
+hundred at most — and it is filled by what needs you first, then oldest first, so the crew
+on the surface is a sample of the colony rather than the whole of it; rolled up from astronauts the wall
 showed eleven repos out of a hundred and seventy-one and looked for all the world like a
 rendering bug. Two thirds of a real projects directory
 is asleep at any moment, and sleeping is drawn quiet rather than dark: a sleeping repo is

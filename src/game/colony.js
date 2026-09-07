@@ -381,6 +381,15 @@ export class Colony {
     this.activePlots = active
     this._rebuildNavigation()
     this.stats = { ...stats, done: stats.celebrating }
+    // Who gets an astronaut, when there are more threads than the crew slider allows: the
+    // ones that need you first. The roster is built busiest repo first and oldest thread
+    // first within it, and until now the cap simply took the top of that — so a colony
+    // where two thirds of the threads are asleep put eighty sleepers on the surface and left
+    // most of the sixty that wanted an answer without a body. The sort is stable and every
+    // entry's slot was fixed above before it happens, so nobody moves house; a thread that
+    // wakes up gains an astronaut, and one that nods off may lose its turn, which is what
+    // the surface is for.
+    roster.sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status))
     this.astronauts.setRoster(roster, this._world())
     return this.stats
   }
@@ -667,9 +676,9 @@ export class Colony {
    * are fewer of them than there are panels, and it is the thing you actually think in.
    *
    * Counted off `threads` and not off the crew, which is the whole reason this is worth a
-   * comment. The astronaut pool is a fixed number of instances — ninety here — and the
-   * roster fills it busiest-repo-first, so the crew you can see on the surface covers only
-   * the first handful of repos. Rolling the wall up from astronauts showed eleven repos out
+   * comment. The astronaut pool is the crew slider — ninety here — and it is filled by
+   * what needs you first, so the crew you can see on the surface is a sample of the
+   * colony rather than the whole of it. Rolling the wall up from astronauts showed eleven repos out
    * of a hundred and seventy-one and looked for all the world like a rendering bug. The
    * threads are the truth; the astronauts are a sample of them that happens to fit.
    */
