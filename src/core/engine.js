@@ -294,8 +294,17 @@ export class Engine {
     this.tiltShift?.setStrength(this.settings.get('tiltShiftStrength') * scale)
   }
 
+  /**
+   * Buffer pixels per CSS pixel, and never more than two of them. The slider goes to 200%
+   * so that a non-retina screen can supersample; on a retina panel the same 200% asked for
+   * four buffer pixels per CSS pixel — a 5,600-wide buffer on a laptop — which no display
+   * can show and no laptop can hold with the effects on. The governor then spent the whole
+   * session stepping it down and, after each cooldown, trying to climb back, and every one
+   * of those steps is a rebuilt render target, which is a black frame. Two is the most that
+   * is ever visible; past it the slider is asking for flashes.
+   */
   _targetScale() {
-    return this.settings.get('renderScale') * (window.devicePixelRatio || 1)
+    return Math.min(2, this.settings.get('renderScale') * (window.devicePixelRatio || 1))
   }
 
   start() {
@@ -380,8 +389,12 @@ export class Engine {
       next = Math.max(floor, current - 0.15 * dpr)
       this._slow = 0
       // Having just proved this machine cannot hold the higher scale, do not go back and
-      // ask it again ten seconds later — that is the oscillation.
-      this._climbAt = now + 30000
+      // ask it again. A climb is a resize, a resize is a black frame, and a machine that
+      // was too slow at this scale thirty seconds ago is the same machine now — climbing
+      // back on a cooldown is exactly how a session turns into a slow sawtooth of flashes.
+      // The ceiling comes back the moment the settings change or the page reloads, which
+      // is when the question is genuinely new.
+      this._climbAt = Infinity
     } else if (this._fast >= 8 && current < ceiling && now >= (this._climbAt || 0)) {
       next = Math.min(ceiling, current + 0.1 * dpr)
       this._fast = 0

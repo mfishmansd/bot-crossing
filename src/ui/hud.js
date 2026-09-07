@@ -166,9 +166,9 @@ export class Hud {
         2,
         0.05,
         (v) => `${Math.round(v * 100)}%`,
-        '100% is your display’s own resolution, retina included.'
+        '100% is your display’s own resolution, retina included. Above it only helps on a non-retina screen — nothing can show more than twice a CSS pixel, and asking is what causes flashes.'
       ),
-      this._toggle('Adaptive quality', 'autoQuality', 'Quietly drops render scale if frames get expensive.'),
+      this._toggle('Adaptive quality', 'autoQuality', 'Quietly drops render scale if frames get expensive, and stays down for the session — each step is a rebuilt frame.'),
       this._slider('Scatter', 'scatterDensity', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`),
       this._slider('Max crew', 'maxAgents', 10, 200, 10, (v) => String(v)),
       this._toggle('Stars', 'stars')
