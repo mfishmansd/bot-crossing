@@ -33,6 +33,7 @@ import os from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { exists, listDirs, readHead } from '../lib/fsutil.mjs'
+import { openFolder as openInCursor } from './cursor.mjs'
 
 const execFileAsync = promisify(execFile)
 const HOME = os.homedir()
@@ -60,7 +61,13 @@ const PLAIN_ENV = 'BOT_CROSSING_PROJECT_PLAIN'
  * so it is keyed on HEAD's sha and skipped entirely while that holds still. Without the
  * split, `ls-tree` over a 69,000-file repo would run every few seconds forever.
  */
-const LIGHT_TTL_MS = 8 * 1000
+/**
+ * Longer than the page's poll (15s), deliberately. At 8s every poll found the cache stale
+ * and re-ran four or five git processes per repo — some four hundred spawns a poll on a
+ * hundred-repo directory — to learn, nearly always, that nothing had changed. At 20s
+ * every other poll does, which halves that for a staleness nobody can see.
+ */
+const LIGHT_TTL_MS = 20 * 1000
 /** Walking a non-repo folder is the most expensive thing here and the least urgent. */
 const PLAIN_TTL_MS = 5 * 60 * 1000
 const cache = new Map()
@@ -592,6 +599,8 @@ async function openThread(ref) {
   const opener = await chooseOpener()
   if (opener === 'none') return { ok: false, error: 'Opening is off — unset BOT_CROSSING_PROJECT_OPEN' }
   if (opener === 'claude') return newSession(dir)
+  // Cursor's URL scheme opens the app and not the folder; its adapter knows the way in.
+  if (opener === 'cursor') return openInCursor(dir)
   const editor = EDITORS[opener]
   if (!editor) return { ok: false, error: `Unknown ${OPEN_ENV}: ${opener}` }
   return { ok: true, url: fileUrl(editor.scheme, dir) }

@@ -49,6 +49,8 @@ async function readState() {
       opened: asArray(raw.opened),
       plots: asObject(raw.plots),
       seen: asObject(raw.seen),
+      /** When you last left the command deck; what "since your last visit" is measured from. */
+      lastDeckVisit: Number(raw.lastDeckVisit) || 0,
       settings: raw.settings && typeof raw.settings === 'object' ? raw.settings : null,
       updatedAt: Number(raw.updatedAt) || 0,
     }
@@ -70,6 +72,7 @@ async function writeState(next) {
     opened: asArray(next.opened),
     plots: asObject(next.plots),
     seen: asObject(next.seen),
+    lastDeckVisit: Number(next.lastDeckVisit) || 0,
     settings: next.settings && typeof next.settings === 'object' ? next.settings : null,
     updatedAt: Date.now(),
   }
@@ -295,7 +298,10 @@ export async function apiMiddleware(req, res, next) {
 
     if (url.pathname === '/api/open' && req.method === 'POST') {
       const { harness, ref } = await readJsonBody(req)
-      const result = harnessOpenThread(harness, ref)
+      // Awaited, because an adapter is allowed to be async here — the projects adapter
+      // has to find out which editor to use — and reading `.ok` off a Promise answered
+      // every Open on one of its threads with a 400 and launched nothing.
+      const result = await harnessOpenThread(harness, ref)
       if (result.ok) launchResult(result)
       return send(res, result.ok ? 200 : 400, result)
     }

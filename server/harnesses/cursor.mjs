@@ -399,12 +399,14 @@ function newSession(dir) {
 const CURSOR_CLI = [
   '/usr/local/bin/cursor',
   '/Applications/Cursor.app/Contents/Resources/app/bin/cursor',
-  path.join(HOME, 'AppData', 'Local', 'Programs', 'cursor', 'resources', 'app', 'bin', 'cursor.cmd'),
   '/usr/bin/cursor',
   '/snap/bin/cursor',
+  // No Windows entry on purpose. The launcher there is `cursor.cmd`, and a `.cmd` cannot
+  // be spawned without a shell on any Node this project supports (CVE-2024-27980 made
+  // that a synchronous EINVAL). Windows falls through to the URL, which opens the app.
 ]
 
-function openFolder(dir) {
+export function openFolder(dir) {
   const cli = CURSOR_CLI.find((p) => existsSync(p))
   if (cli) return { ok: true, command: [cli, dir] }
   if (process.platform === 'darwin') return { ok: true, command: ['open', '-a', 'Cursor', dir] }
