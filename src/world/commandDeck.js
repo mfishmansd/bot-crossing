@@ -701,7 +701,7 @@ export class CommandDeck {
 
     c.font = '16px ui-monospace, SFMono-Regular, Menlo, monospace'
     c.fillStyle = 'rgba(255,255,255,0.38)'
-    c.fillText('look at a panel for its repo · N for the next that needs you', pad, H - 30)
+    c.fillText('look at a panel for its repo · N next needing you · X sweeps the idle', pad, H - 30)
     this.consoleTexture.needsUpdate = true
   }
 

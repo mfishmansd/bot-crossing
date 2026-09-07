@@ -500,6 +500,17 @@ let atHatch = false
 let deckFacing = -1
 let deckCandidate = -1
 let deckCandidateFrames = 0
+/**
+ * The sweep: archiving everything in a repo — or the colony — that has sat idle for longer
+ * than this. Two presses, because it is the one thing in the game that touches many
+ * records at once; and it is undoable, because the archive call takes a boolean.
+ */
+const SWEEP_DAYS = 30
+const SWEEP_MS = SWEEP_DAYS * 24 * 60 * 60 * 1000
+/** A sweep waiting for its second press: what it would archive, and when it was offered. */
+let sweepArmed = null
+/** The threads the last sweep archived, so U can put them back. */
+let lastSweep = null
 
 /**
  * Whoever is nearest the middle of the view. Size is deliberately not a filter: from the
@@ -619,12 +630,13 @@ function updateDeckFacing() {
     colony.deck.setConsole(colony.consoleSummary())
     return
   }
+  sweepArmed = null
   selectProject(entry.project)
   // The console follows the facing repo. Asking for its readme goes through the same
   // loader the surface boards use, so a repo you have already stood near costs nothing.
   readmeFor(pathForProject(entry.project), entry.project)
   colony.deck.setConsole(colony.consoleFor(entry.project))
-  hud.hint(`${entry.project} · Enter opens · C new thread · A archives · N next needing you · E leave`)
+  hud.hint(`${entry.project} · Enter opens · A archive · C new · X sweep idle · F folder · N next · E leave`)
 }
 
 /** The thread a facing panel stands for — the one that most needs you in that repo. */
@@ -641,6 +653,120 @@ function turnToNextUrgent() {
     return
   }
   rig.turnTo(colony.deck.panelCenter(panel, _hatch))
+}
+
+/**
+ * What a sweep would archive. Only threads that are genuinely asleep — nothing running,
+ * nothing waiting on you, nothing stuck — and only ones the harness will let go of. The
+ * archived flag on a thread means the harness already has it put away; the colony's own
+ * list means you did.
+ */
+function sweepCandidates(project) {
+  const now = Date.now()
+  const done = new Set(state.archived)
+  return threads.filter(
+    (t) =>
+      (!project || t.project === project) &&
+      !t.archived &&
+      !done.has(t.id) &&
+      t.canArchive !== false &&
+      !t.running &&
+      !t.unread &&
+      !t.hasError &&
+      now - t.lastActivityAt > SWEEP_MS
+  )
+}
+
+/**
+ * X, aboard. Facing a repo it offers to sweep that repo; facing nothing it offers the
+ * colony. The first press says what it would do and how much; the second, inside eight
+ * seconds, does it. Anything else in between — turning to another panel, say — takes the
+ * offer off the table rather than leaving a loaded key behind you.
+ */
+function armOrRunSweep() {
+  const entry = colony.deck.entryAt(deckFacing)
+  const scope = entry ? entry.project : null
+  const list = sweepCandidates(scope)
+  const where = scope || 'the colony'
+  if (!list.length) {
+    sweepArmed = null
+    hud.hint(`Nothing in ${where} has been idle over ${SWEEP_DAYS} days`)
+    return
+  }
+  const armed = sweepArmed && sweepArmed.scope === scope && Date.now() - sweepArmed.at < 8000
+  if (!armed) {
+    sweepArmed = { scope, at: Date.now() }
+    hud.hint(`Archive ${list.length} thread${list.length === 1 ? '' : 's'} idle over ${SWEEP_DAYS} days in ${where}? X again to confirm`)
+    return
+  }
+  sweepArmed = null
+  runSweep(list, where)
+}
+
+/**
+ * Archive a list of threads, a few at a time, and tell the colony once. The per-thread
+ * action re-lays the colony after every call; a hundred of those in a row would re-lay it a
+ * hundred times to arrive at the same map.
+ */
+async function runSweep(list, where) {
+  hud.hint(`Archiving ${list.length} in ${where}…`)
+  const done = []
+  let next = 0
+  const worker = async () => {
+    while (next < list.length) {
+      const thread = list[next++]
+      try {
+        await archiveThread(thread, true)
+        done.push(thread)
+      } catch {
+        // One refusal is not a reason to stop the rest; it is simply not in `done`.
+      }
+    }
+  }
+  await Promise.all([worker(), worker(), worker(), worker()])
+  if (!done.length) {
+    hud.toast(`Could not archive anything in ${where}`, 'err')
+    return
+  }
+  const at = Date.now()
+  state.archived = [...new Set([...state.archived, ...done.map((t) => t.id)])]
+  state.archivedAt = { ...state.archivedAt, ...Object.fromEntries(done.map((t) => [t.id, at])) }
+  queueSave()
+  applyThreads(threads)
+  lastSweep = done
+  colony.ship.ping()
+  hud.toast(`Archived ${done.length} in ${where} · U to undo`)
+}
+
+/** U, aboard: put the last sweep back. The same call with the other boolean. */
+async function undoSweep() {
+  if (!lastSweep || !lastSweep.length) {
+    hud.hint('Nothing to undo')
+    return
+  }
+  const list = lastSweep
+  lastSweep = null
+  hud.hint(`Restoring ${list.length}…`)
+  const back = []
+  let next = 0
+  const worker = async () => {
+    while (next < list.length) {
+      const thread = list[next++]
+      try {
+        await archiveThread(thread, false)
+        back.push(thread.id)
+      } catch {
+        // Left archived, and said so in the count below.
+      }
+    }
+  }
+  await Promise.all([worker(), worker(), worker(), worker()])
+  const gone = new Set(back)
+  state.archived = state.archived.filter((id) => !gone.has(id))
+  state.archivedAt = Object.fromEntries(Object.entries(state.archivedAt).filter(([id]) => !gone.has(id)))
+  queueSave()
+  applyThreads(threads)
+  hud.toast(back.length === list.length ? `Restored ${back.length}` : `Restored ${back.length} of ${list.length}`)
 }
 
 /** Aboard, or back out. The camera is snapped rather than flown; the deck is a long way down. */
@@ -826,6 +952,22 @@ window.addEventListener('keydown', (e) => {
     if (key === 'n') {
       e.preventDefault()
       turnToNextUrgent()
+      return
+    }
+    if (key === 'x') {
+      e.preventDefault()
+      armOrRunSweep()
+      return
+    }
+    if (key === 'u') {
+      e.preventDefault()
+      undoSweep()
+      return
+    }
+    if (key === 'f') {
+      e.preventDefault()
+      if (selectedProject) actions.revealProject()
+      else hud.hint('Look at a repo first')
       return
     }
     if (e.key === 'Enter' || key === 'a') {
