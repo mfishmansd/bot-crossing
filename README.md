@@ -541,8 +541,9 @@ name starts with what you have typed, then the first that contains it; `Enter` k
 **Sweep the idle.** Two thirds of a real projects directory has not been touched in months,
 and nobody reopens a session from three years ago. Facing a repo, `X` offers to archive
 everything in it that has sat idle for more than thirty days — nothing running, nothing
-waiting on you, nothing stuck, and nothing the harness will not let go of — and says how
-many. `X` again inside eight seconds does it; turning to another panel takes the offer off
+waiting on you, nothing stuck — and says how many. Threads whose harness keeps no record
+to flag are hidden in the colony alone, exactly as the sidebar's button does, and the
+toast says how many were. `X` again inside eight seconds does it; turning to another panel takes the offer off
 the table. From the dashboard it offers the colony. It writes exactly the archive flag the
 sidebar's button writes, one thread at a time through the same call, and that call takes a
 boolean, so `U` puts the last sweep back.

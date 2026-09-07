@@ -679,9 +679,13 @@ function turnToNextUrgent() {
 
 /**
  * What a sweep would archive. Only threads that are genuinely asleep — nothing running,
- * nothing waiting on you, nothing stuck — and only ones the harness will let go of. The
- * archived flag on a thread means the harness already has it put away; the colony's own
- * list means you did.
+ * nothing waiting on you, nothing stuck. The archived flag on a thread means the harness
+ * already has it put away; the colony's own list means you did. `canArchive` is
+ * deliberately not consulted: it means the harness keeps no record to flag, and for those
+ * the archive is recorded in the colony alone — which is exactly what the sidebar's own
+ * button does, with a toast saying so. A sweep that skipped them would leave two thirds of
+ * a real colony untouchable, for a distinction the per-thread action already makes and
+ * reports.
  */
 function sweepCandidates(project) {
   const now = Date.now()
@@ -691,7 +695,6 @@ function sweepCandidates(project) {
       (!project || t.project === project) &&
       !t.archived &&
       !done.has(t.id) &&
-      t.canArchive !== false &&
       !t.running &&
       !t.unread &&
       !t.hasError &&
@@ -733,13 +736,15 @@ function armOrRunSweep() {
 async function runSweep(list, where) {
   hud.hint(`Archiving ${list.length} in ${where}…`)
   const done = []
+  let hereOnly = 0
   let next = 0
   const worker = async () => {
     while (next < list.length) {
       const thread = list[next++]
       try {
-        await archiveThread(thread, true)
+        const res = await archiveThread(thread, true)
         done.push(thread)
+        if (res.harnessRecord === false) hereOnly++
       } catch {
         // One refusal is not a reason to stop the rest; it is simply not in `done`.
       }
@@ -757,7 +762,10 @@ async function runSweep(list, where) {
   applyThreads(threads)
   lastSweep = done
   colony.ship.ping()
-  hud.toast(`Archived ${done.length} in ${where} · U to undo`)
+  // Said the way the single-thread action says it: a harness with no record for a thread
+  // means the colony is hiding it on its own, and you should know which kind you did.
+  const note = hereOnly ? ` (${hereOnly} here only, no harness record)` : ''
+  hud.toast(`Archived ${done.length} in ${where}${note} · U to undo`)
 }
 
 /** U, aboard: put the last sweep back. The same call with the other boolean. */
