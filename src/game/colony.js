@@ -792,7 +792,14 @@ export class Colony {
     const threads = []
     for (const thread of this.threads.values()) {
       if ((thread.project || 'unknown') !== name) continue
-      threads.push({ id: thread.id, title: thread.title || '', status: statusFor(thread, now) })
+      threads.push({
+        id: thread.id,
+        title: thread.title || '',
+        status: statusFor(thread, now),
+        // Its last message. Every thread carries one and nothing showed it; it is the
+        // difference between a list of titles and a room of people mid-sentence.
+        preview: thread.preview || '',
+      })
     }
     // Worst first, exactly the order Enter works through them.
     threads.sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status))

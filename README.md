@@ -556,6 +556,13 @@ were looking at, camera arriving with you. The deck is the one place that knows 
 at once, so board, find one by name, and step out: that is the shortest route across the
 colony there is.
 
+### What they last said
+
+Every thread carries its last message, and nothing showed it. Now the console prints the
+picked thread's last words along its bottom edge, so you read what it said without opening
+it; and out on the surface, `R` on an astronaut adds *the last thing I said* under what
+the readme says about the place. The readme is the place. This is the person.
+
 ### Since your last visit
 
 The colony file remembers when you last left the deck. Coming back, any repo with a thread

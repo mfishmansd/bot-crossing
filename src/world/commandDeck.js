@@ -569,7 +569,7 @@ export class CommandDeck {
       ? ''
       : info.summary
         ? ['summary', info.threads, info.repos, info.waiting, info.working, info.blocked, info.done, info.moved, info.since].join('\u0000')
-        : [info.project, info.title, info.tagline, info.readmeState, info.cursor, ...info.threads.map((t) => t.status + t.title)].join('\u0000')
+        : [info.project, info.title, info.tagline, info.readmeState, info.cursor, ...info.threads.map((t) => t.status + t.title + (t.preview || ''))].join('\u0000')
     this.consoleName = info && !info.summary ? info.project : null
     this.console.visible = Boolean(info)
     if (signature === this._consoleSignature) return
@@ -648,10 +648,14 @@ export class CommandDeck {
     c.fillText(total.toUpperCase(), pad, y)
     y += 26
     const rowH = 27
-    const room = Math.max(0, Math.floor((H - 22 - y) / rowH))
+    const cursor = Math.max(0, Math.min(info.cursor || 0, info.threads.length - 1))
+    // The picked thread's last words go along the bottom, so the list gives up two rows
+    // for them when there are any to show.
+    const said = (info.threads[cursor] && info.threads[cursor].preview) || ''
+    const reserve = said ? 58 : 0
+    const room = Math.max(0, Math.floor((H - 22 - reserve - y) / rowH))
     // The list scrolls to keep the picked row on the screen, and no further: a list that
     // recentres on every keypress is one whose rows never stay where you left them.
-    const cursor = Math.max(0, Math.min(info.cursor || 0, info.threads.length - 1))
     const start = Math.max(0, Math.min(cursor - room + 1, info.threads.length - room))
     const shown = info.threads.slice(start, start + room)
     const mark = 14
@@ -682,6 +686,18 @@ export class CommandDeck {
       if (above) parts.push(`${above} above`)
       if (below) parts.push(`${below} more`)
       c.fillText(`… ${parts.join(' · ')}`, pad, y)
+    }
+    if (said) {
+      c.strokeStyle = 'rgba(63,158,196,0.35)'
+      c.lineWidth = 1
+      c.beginPath()
+      c.moveTo(pad, H - 58)
+      c.lineTo(W - pad, H - 58)
+      c.stroke()
+      c.font = 'italic 16px ui-monospace, SFMono-Regular, Menlo, monospace'
+      c.fillStyle = 'rgba(255,255,255,0.62)'
+      const lines = wrap(c, `“${said.replace(/\s+/g, ' ').trim()}”`, width, 2)
+      lines.forEach((line, k) => c.fillText(line, pad, H - 36 + k * 20))
     }
     this.consoleTexture.needsUpdate = true
   }

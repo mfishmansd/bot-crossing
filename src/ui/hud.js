@@ -603,6 +603,20 @@ export class Hud {
             : `There is no readme in ${name}. Nobody has written down what we are building.`
 
     this.$('.thread-pop .says .line').textContent = line
+
+    // And what this astronaut itself last said. The readme is the place; this is the
+    // person, and a colony of figures becomes a colony of people the moment they are
+    // caught mid-sentence.
+    const said = (this.selected?.thread?.preview || '').replace(/\s+/g, ' ').trim()
+    let saidEl = says.querySelector('.said')
+    if (!saidEl) {
+      saidEl = document.createElement('p')
+      saidEl.className = 'said'
+      says.appendChild(saidEl)
+    }
+    saidEl.hidden = !said
+    saidEl.textContent = said ? `The last thing I said: “${said.length > 180 ? said.slice(0, 177) + '…' : said}”` : ''
+
     this.$('#btn-read-more').hidden = readme?.state !== 'ready'
     this._measureCard()
   }
