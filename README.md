@@ -30,6 +30,13 @@ all go through a `harness://` deep link handed to the OS opener — `open(1)` on
 the deep link needs a desktop app registered for that scheme, so on Linux the folder buttons
 work while opening a thread has nothing to reach yet.
 
+A harness whose deep link opens the app but not the place may hand back a command instead,
+and the server runs that detached. Cursor is the one that does: its `cursor://file/…` link
+brings the window to the front and opens nothing, while `cursor <dir>` on the command line
+opens the folder as a workspace. The command is the `cursor` on your `PATH` — the one Cursor
+installs when you ask it to — never anything inside `Cursor.app`; with none on `PATH`, a Mac
+gets `open -a Cursor` and Windows falls back to the link.
+
 ## Which harnesses work
 
 A **harness** is whatever actually runs your threads. Bot Crossing reads each one's local
@@ -42,7 +49,7 @@ somebody writing that adapter.
 | [Codex CLI](https://developers.openai.com/codex/cli) (OpenAI) | ⬜ Not yet — transcripts found at `~/.codex/sessions/`, [notes here](server/harnesses/README.md#starting-points) |
 | [OpenCode](https://opencode.ai) | ⬜ Not yet |
 | [Antigravity CLI](https://antigravity.google) (Google) | ⬜ Not yet — the successor to Gemini CLI, which Google stopped serving individual accounts on 18 June 2026 |
-| [Cursor](https://cursor.com) (`cursor-agent`) | ✅ **Supported** — the CLI's own sessions. Cursor writes no live-process file, so "running" is inferred from having been written in the last few minutes, and it keeps no archived state, so archiving is recorded on the colony's side only. The IDE's chats are not read: they live in a SQLite database the editor holds open and which runs to tens of gigabytes on a well-used machine |
+| [Cursor](https://cursor.com) (`cursor-agent`) | ✅ **Supported** — the CLI's own sessions. Cursor writes no live-process file, so "running" is inferred from having been written in the last few minutes, and it keeps no archived state, so archiving is recorded on the colony's side only. The IDE's chats are not read: they live in a SQLite database the editor holds open and which runs to tens of gigabytes on a well-used machine. Open and New conversation go through the `cursor` command on your `PATH` — see [Run it](#run-it) |
 | [Amp](https://ampcode.com) (Sourcegraph) | ⬜ Not yet |
 | [Aider](https://aider.chat) | ⬜ Not yet |
 | [Goose](https://block.github.io/goose/) (Block) | ⬜ Not yet |
@@ -66,6 +73,23 @@ asked of a folder instead of a session. A projects directory is mostly work you 
 this afternoon, and a map that draws only the live threads draws the smallest part of it.
 
 It never writes anything at all — not even the archive flag the Claude Code adapter sets.
+
+#### Pointing it somewhere
+
+Left alone it looks in the boring places under your home — `Projects`, `projects`, `src`,
+`code`, `dev`, `repos`, `workspace`, `Developer` — and skips any that are not there. Three
+environment variables change that, and a fourth moves the Cursor adapter:
+
+| Variable | Does |
+| --- | --- |
+| `BOT_CROSSING_PROJECT_ROOTS` | Where to look instead. A list in the platform's own path format — `:` on macOS and Linux, `;` on Windows, and commas work everywhere |
+| `BOT_CROSSING_PROJECT_OPEN` | Which editor the Open button hands a folder to: `vscode`, `cursor`, `windsurf`, `auto` to take the first one installed (the default), or `none` to turn the button off |
+| `BOT_CROSSING_PROJECT_PLAIN` | Folders with no `.git` in them still get an astronaut. Set to `0` to draw repos only |
+| `BOT_CROSSING_CURSOR_PROJECTS` | Where `cursor-agent` keeps its transcripts, if not `~/.cursor/projects` |
+
+```bash
+BOT_CROSSING_PROJECT_ROOTS=~/work:~/clients BOT_CROSSING_PROJECT_OPEN=cursor npm run dev
+```
 
 ### Adding one
 
@@ -960,7 +984,7 @@ What it touches on disk, in full:
 
 | | |
 | --- | --- |
-| Reads | Your harness's own session records and transcripts |
+| Reads | Your harness's own session records and transcripts; for the projects adapter, your repositories' metadata through `git`, read-only; for `R` and the deck's console, a repo's README |
 | Writes | `data/colony.json`, and **one** `isArchived` field per archived thread |
 | Sends | Nothing. No network calls, no telemetry, no account |
 
@@ -974,15 +998,17 @@ server/
   harnesses/   one adapter per agent harness — README.md is the contract
     index.mjs    the registry: add your harness to the list here
     claude-code.mjs
-  lib/         filesystem helpers the adapters share
+    cursor.mjs     cursor-agent's transcripts; opens through the cursor command, not a link
+    git-repos.mjs  no harness at all: your projects directory, one thread per branch
+  lib/         filesystem helpers the adapters share, and the one decoder for encoded paths
   scan.mjs     harness-agnostic: asks every detected harness, merges, sorts
   api.mjs      /api/threads, /api/harnesses, /api/state, /api/open, /api/archive,
                /api/new-session, /api/reveal, /api/readme
   readme.mjs   finds and reads a repo's README, capped and cached on its mtime
   serve.mjs    static server for the built app
 src/
-  core/        settings, renderer + post chain, the Google Earth camera
-  world/       planets, terrain, sky, hex plots, the model kit, buildings, the ship
+  core/        settings, renderer + post chain, the Google Earth camera, the synthesised sound
+  world/       planets, terrain, sky, hex plots, the model kit, buildings, the ship and its deck
   agents/      the crew rig and its bake, instanced astronauts, faces, badges, particles
   game/        threads → colony, and the API client
   ui/          the HUD, and the small markdown renderer the readme pane uses
