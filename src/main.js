@@ -557,7 +557,7 @@ function stopWalk() {
   if (!walkingId) return
   // Letting go while aboard would strand the astronaut on a deck six hundred units under
   // the colony, walking its errands underground for the rest of the session.
-  if (colony.aboard) colony.leaveShip()
+  if (colony.aboard) leaveDeck()
   rig.setInterior(null)
   colony.deck.setFocused(-1)
   deckFacing = deckCandidate = -1
@@ -575,7 +575,7 @@ function stopWalk() {
 // scan — and when it is, the page has to put the camera back rather than follow a ghost.
 colony.astronauts.onReleased = () => {
   if (!walkingId) return
-  if (colony.aboard) colony.leaveShip()
+  if (colony.aboard) leaveDeck()
   rig.setInterior(null)
   colony.deck.setFocused(-1)
   deckFacing = deckCandidate = -1
@@ -836,11 +836,21 @@ function deckSearchKey(e) {
   return false
 }
 
+/**
+ * Every way off the deck goes through here, so the colony file always knows when you were
+ * last aboard — which is what "since your last visit" is measured from next time.
+ */
+function leaveDeck() {
+  state.lastDeckVisit = Date.now()
+  queueSave()
+  return colony.leaveShip()
+}
+
 /** Aboard, or back out. The camera is snapped rather than flown; the deck is a long way down. */
 function toggleAboard() {
   if (!walkingId) return
   if (colony.aboard) {
-    const agent = colony.leaveShip()
+    const agent = leaveDeck()
     if (agent) {
       deckSearch = null
       deckFacing = deckCandidate = -1
@@ -857,6 +867,7 @@ function toggleAboard() {
   if (!agent) return
   const door = colony.ship.shipDoor(_hatch)
   if (Math.hypot(agent.pos.x - door.x, agent.pos.z - door.z) > HATCH_RANGE) return
+  colony.setDeckSince(state.lastDeckVisit || 0)
   const aboard = colony.boardShip()
   if (!aboard) return
   rig.setInterior(colony.deck.cameraBounds())

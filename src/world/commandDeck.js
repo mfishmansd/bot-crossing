@@ -127,6 +127,17 @@ function wrap(c, text, max, lines) {
   return out
 }
 
+/** "3 hours ago", in the coarsest unit that is still honest. */
+function agoLabel(ms) {
+  const m = Math.round(ms / 60000)
+  if (m < 2) return 'just now'
+  if (m < 60) return `${m} minutes ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return h === 1 ? 'an hour ago' : `${h} hours ago`
+  const d = Math.round(h / 24)
+  return d === 1 ? 'yesterday' : `${d} days ago`
+}
+
 export class CommandDeck {
   constructor(scene) {
     this.group = new THREE.Group()
@@ -400,6 +411,15 @@ export class CommandDeck {
       const label = ellipsize(c, entry.harness, width - statusW - 12)
       c.fillText(label, CELL_W - pad - c.measureText(label).width, CELL_H - 15)
     }
+    if (entry.moved) {
+      // Something happened here since you were last aboard. A dot in the corner, in the
+      // console's own blue rather than a status colour, because it is not a state — it is
+      // a difference, and it is gone the next time you come in.
+      c.fillStyle = '#3f9ec4'
+      c.beginPath()
+      c.arc(CELL_W - pad - 6, 20, 6, 0, Math.PI * 2)
+      c.fill()
+    }
     c.restore()
   }
 
@@ -456,7 +476,7 @@ export class CommandDeck {
     // frame, so it happens only when the wall is actually showing something else. Colour
     // still follows every sync: a thread changing what it is doing is a tint, not a redraw.
     const signature = byPanel
-      .map((e) => (e ? [e.id, e.total, e.counts.blocked, e.counts.waiting, e.counts.working, e.title].join('\u0000') : ''))
+      .map((e) => (e ? [e.id, e.total, e.counts.blocked, e.counts.waiting, e.counts.working, e.title, e.moved ? 1 : 0].join('\u0000') : ''))
       .join('\u0001')
     if (signature !== this._signature) {
       this._signature = signature
@@ -548,7 +568,7 @@ export class CommandDeck {
     const signature = !info
       ? ''
       : info.summary
-        ? ['summary', info.threads, info.repos, info.waiting, info.working, info.blocked, info.done].join('\u0000')
+        ? ['summary', info.threads, info.repos, info.waiting, info.working, info.blocked, info.done, info.moved, info.since].join('\u0000')
         : [info.project, info.title, info.tagline, info.readmeState, info.cursor, ...info.threads.map((t) => t.status + t.title)].join('\u0000')
     this.consoleName = info && !info.summary ? info.project : null
     this.console.visible = Boolean(info)
@@ -714,6 +734,15 @@ export class CommandDeck {
     const threads = info.threads === 1 ? '1 thread' : `${info.threads} threads`
     const repos = info.repos === 1 ? '1 repo' : `${info.repos} repos`
     c.fillText(`${threads} across ${repos}`, pad, 292)
+
+    if (info.since) {
+      // The question you actually walk in with.
+      const ago = agoLabel(Date.now() - info.since)
+      c.font = '18px ui-monospace, SFMono-Regular, Menlo, monospace'
+      c.fillStyle = info.moved ? 'rgba(159,199,242,0.95)' : 'rgba(255,255,255,0.5)'
+      const what = info.moved === 1 ? '1 repo moved' : `${info.moved} repos moved`
+      c.fillText(`${what} since your last visit, ${ago}`, pad, 326)
+    }
 
     c.font = '16px ui-monospace, SFMono-Regular, Menlo, monospace'
     c.fillStyle = 'rgba(255,255,255,0.38)'

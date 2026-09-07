@@ -191,6 +191,8 @@ export class Colony {
     this.aboard = false
     /** Which row of the facing repo's queue is picked. The page moves it; the console draws it. */
     this.deckCursor = 0
+    /** When you last left the deck, or 0. Anything that moved since is marked on the wall. */
+    this.deckSince = 0
     this.astronauts = new Astronauts(scene, settings)
     this.astronauts.world = this._world()
     this.indicators = new Indicators(scene, settings, Math.max(64, settings.get('maxAgents')))
@@ -693,9 +695,10 @@ export class Colony {
       const key = thread.project || 'unknown'
       let row = byProject.get(key)
       if (!row) {
-        row = byProject.set(key, { counts: {}, total: 0, harness: '', title: '', threadId: null, rank: 99 }).get(key)
+        row = byProject.set(key, { counts: {}, total: 0, harness: '', title: '', threadId: null, rank: 99, moved: false }).get(key)
       }
       row.total++
+      if (this.deckSince && thread.lastActivityAt > this.deckSince) row.moved = true
       const status = statusFor(thread, now)
       row.counts[status] = (row.counts[status] || 0) + 1
       if (!row.harness) row.harness = thread.harnessName || thread.harness || ''
@@ -727,9 +730,15 @@ export class Colony {
         title: row.title,
         threadId: row.threadId,
         harness: row.harness,
+        moved: row.moved,
       })
     }
     this.deck.sync(rows)
+  }
+
+  /** Set before boarding, from the colony file, so the first sync can mark what moved. */
+  setDeckSince(at) {
+    this.deckSince = at || 0
   }
 
   /**
@@ -739,8 +748,16 @@ export class Colony {
    */
   consoleSummary() {
     const s = this.stats
+    const moved = new Set()
+    if (this.deckSince) {
+      for (const thread of this.threads.values()) {
+        if (thread.lastActivityAt > this.deckSince) moved.add(thread.project || 'unknown')
+      }
+    }
     return {
       summary: true,
+      since: this.deckSince,
+      moved: moved.size,
       threads: s.agents,
       repos: this.plotOrder.length,
       waiting: s.waiting || 0,
