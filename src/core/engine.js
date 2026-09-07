@@ -137,6 +137,13 @@ export class Engine {
   applySettings() {
     const s = this.settings
     const renderer = this.renderer
+    // Settings changed, so what this machine can hold is an open question again: the
+    // governor's decision and its refusal to climb are both let go. This — and a reload —
+    // is the only way back up, on purpose; see `_governQuality`.
+    this._governedScale = null
+    this._climbAt = 0
+    this._slow = 0
+    this._fast = 0
 
     const size = SHADOW_SIZES[s.get('shadows')] || 0
     renderer.shadowMap.enabled = size > 0
@@ -246,7 +253,7 @@ export class Engine {
     this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
 
-    const scale = this._targetScale()
+    const scale = this._effectiveScale()
     const bw = Math.max(1, Math.round(w * scale))
     const bh = Math.max(1, Math.round(h * scale))
 
@@ -305,6 +312,18 @@ export class Engine {
    */
   _targetScale() {
     return Math.min(2, this.settings.get('renderScale') * (window.devicePixelRatio || 1))
+  }
+
+  /**
+   * The scale actually drawn at: the ceiling, or whatever the governor has brought it down
+   * to. Kept as its own value rather than read back off the last resize, because a resize
+   * can come from anywhere — a focus, a tab shown again, a window dragged — and one that
+   * went back to the ceiling threw the governor's decision away and, on a machine that
+   * could not hold the ceiling, bought a black frame now and another when it dropped again.
+   */
+  _effectiveScale() {
+    const ceiling = this._targetScale()
+    return this._governedScale ? Math.min(ceiling, this._governedScale) : ceiling
   }
 
   start() {
@@ -387,6 +406,7 @@ export class Engine {
     let next = current
     if (this._slow >= 3) {
       next = Math.max(floor, current - 0.15 * dpr)
+      this._governedScale = next
       this._slow = 0
       // Having just proved this machine cannot hold the higher scale, do not go back and
       // ask it again. A climb is a resize, a resize is a black frame, and a machine that
@@ -397,6 +417,7 @@ export class Engine {
       this._climbAt = Infinity
     } else if (this._fast >= 8 && current < ceiling && now >= (this._climbAt || 0)) {
       next = Math.min(ceiling, current + 0.1 * dpr)
+      this._governedScale = next < ceiling - 0.01 ? next : null
       this._fast = 0
     }
 
