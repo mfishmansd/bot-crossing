@@ -21,6 +21,7 @@ import {
   fetchReadme,
 } from './game/api.js'
 import { renderMarkdown, readmeSummary } from './ui/markdown.js'
+import { hideProject, hiddenCatalog, unhideProject } from './game/hidden-projects.js'
 
 /**
  * Boot and the outer game loop.
@@ -64,7 +65,7 @@ window.addEventListener('pointerdown', wake)
 // repository is public. If the file is not there you get a plain P and nothing breaks.
 colony.astronauts.setLogo(`${import.meta.env.BASE_URL}assets/local/privion-mark.svg`)
 
-let state = { archived: [], archivedAt: {}, opened: [], plots: {}, seen: {} }
+let state = { archived: [], archivedAt: {}, opened: [], plots: {}, seen: {}, hiddenProjects: [], viewedAt: {} }
 let threads = []
 /** Last legend built for the bottom bar, kept so the open zone's chip can light up between polls. */
 let legendProjects = []
@@ -139,6 +140,7 @@ const actions = {
 
   cycleTime: () => {
     settings.set('autoTime', false)
+    settings.set('clockTime', false)
     const current = settings.get('timeOfDay')
     // Step to the next named time *after* the current one, wrapping at midnight.
     const next = TIMES.find((t) => t.value > current + 0.005) || TIMES[0]
@@ -211,6 +213,47 @@ const actions = {
     }
   },
 
+  /**
+   * Stop a thread asking for you, without touching it.
+   *
+   * `unread` comes from the harness, and the harness only counts a thread as read when it is
+   * focused *in its own app*. Answer one in a terminal, or read it over somebody's shoulder,
+   * and it keeps its hand up forever. Marking it viewed here records when you looked; the
+   * moment the thread does something newer than that it goes back to waving, which is the
+   * behaviour you actually want and the reason this is a timestamp rather than a flag.
+   */
+  markViewed: () => {
+    const thread = threads.find((t) => t.id === selectedId)
+    if (!thread) return
+    state.viewedAt = { ...(state.viewedAt || {}), [thread.id]: Date.now() }
+    queueSave()
+    applyThreads(threads)
+    hud.toast(`Marked ${thread.title.slice(0, 40)} as viewed`)
+  },
+
+  hideProject: () => {
+    const name = selectedProject
+    if (!name) return
+    state.hiddenProjects = hideProject(state.hiddenProjects || [], name)
+    queueSave()
+    // If the open thread belonged to the repo that just left, nothing is selected any more.
+    if (selectedId) {
+      const thread = threads.find((t) => t.id === selectedId)
+      if (thread?.project === name) select(null, {})
+    }
+    selectedProject = null
+    applyThreads(threads)
+    hud.toast(`Hidden ${name} — still in your harness, gone from the colony`)
+  },
+
+  unhideProject: (name) => {
+    if (!name) return
+    state.hiddenProjects = unhideProject(state.hiddenProjects || [], name)
+    queueSave()
+    applyThreads(threads)
+    hud.toast(`Showing ${name} again`)
+  },
+
   copyProjectPath: async () => {
     const folder = selectedProject && pathForProject(selectedProject)
     if (!folder) return
@@ -244,15 +287,23 @@ const actions = {
     if (!thread) return
     try {
       const res = await archiveThread(thread, true)
+      const foldedBefore = new Set(colony.dormantProjects || [])
       state.archived = [...new Set([...state.archived, thread.id])]
       state.archivedAt = { ...state.archivedAt, [thread.id]: Date.now() }
       queueSave()
       select(null, {})
       applyThreads(threads)
+      // Retiring the last thread anybody has touched in a repo makes every thread left in it
+      // dormant, and the whole zone folds away — sixty astronauts can leave the map on one
+      // click. That is the setting working, but silently it reads as the colony breaking, so
+      // it says which repo went and why.
+      const folded = [...(colony.dormantProjects || [])].filter((n) => !foldedBefore.has(n))
       hud.toast(
-        res.harnessRecord === false
-          ? `Archived here (no ${thread.harnessName || 'harness'} record for it)`
-          : 'Archived — heading home'
+        folded.length
+          ? `Archived — ${folded.join(', ')} ${folded.length === 1 ? 'is' : 'are'} all quiet now, folded off the map`
+          : res.harnessRecord === false
+            ? `Archived here (no ${thread.harnessName || 'harness'} record for it)`
+            : 'Archived — heading home'
       )
       colony.ship.ping()
     } catch (err) {
@@ -442,11 +493,15 @@ function readmePanel(folder) {
 
 /** Push the open zone's current contents at the sidebar. Closes it if the zone is gone. */
 function syncProject() {
+  const hidden = hiddenCatalog(state.hiddenProjects || [], threads)
+  // Folded-away repos are listed alongside the ones you hid by hand. Same principle: nothing
+  // leaves the map without somewhere on screen saying where it went.
+  const folded = hiddenCatalog([...(colony.dormantProjects || [])], threads)
   const plot = selectedProject ? colony.plots.get(selectedProject) : null
   if (!plot) {
     selectedProject = null
     hud.setProject(null)
-    hud.setLegend(legendProjects, null)
+    hud.setLegend(legendProjects, null, hidden, folded)
     return
   }
   const now = Date.now()
@@ -480,7 +535,7 @@ function syncProject() {
   })
   // The legend is the same selection seen from the bottom of the screen: keep it in step
   // here rather than only on the next poll.
-  hud.setLegend(legendProjects, selectedProject)
+  hud.setLegend(legendProjects, selectedProject, hidden, folded)
 }
 
 // ── walking one of them yourself ──────────────────────────────────────────────────────
@@ -1187,6 +1242,10 @@ window.addEventListener('keydown', (e) => {
     case 'A':
       if (selectedId) actions.archiveThread()
       break
+    case 'v':
+    case 'V':
+      if (selectedId) actions.markViewed()
+      break
     case 'c':
     case 'C':
       if (selectedProject) actions.newConversation()
@@ -1252,9 +1311,31 @@ window.addEventListener('blur', () => held.clear())
 // ── data ──────────────────────────────────────────────────────────────────────────────
 
 function applyThreads(list) {
-  threads = list
+  // A thread you have said you looked at stops counting as unread until it moves on again.
+  // Done here rather than in `statusFor` so the card, the badge and the astronaut all agree.
+  const viewed = state.viewedAt || {}
+  threads = list.map((t) => {
+    const at = viewed[t.id]
+    return at && t.lastActivityAt <= at ? { ...t, unread: false } : t
+  })
+  list = threads
   const archivedSet = new Set(state.archived)
-  const stats = colony.setThreads(list, archivedSet)
+  const hiddenSet = new Set(state.hiddenProjects || [])
+
+  // Which threads the colony has met before. Walking out of the ship is meant to *mean*
+  // something — a thread that just appeared — and without this every reload staged a
+  // hundred-astronaut entrance, which piled up at the ramp and read as a bug because it was
+  // one. A thread already on the books is simply already outside.
+  const known = new Set(Object.keys(state.seen || {}))
+  let firstSeen = false
+  for (const t of list) {
+    if (state.seen?.[t.id]) continue
+    state.seen = { ...(state.seen || {}), [t.id]: Date.now() }
+    firstSeen = true
+  }
+  if (firstSeen) queueSave()
+
+  const stats = colony.setThreads(list, archivedSet, hiddenSet, known)
   hud.setStats(stats)
 
   legendProjects = colony.plotOrder
@@ -1306,7 +1387,10 @@ function queueSave() {
   clearTimeout(pendingSave)
   pendingSave = setTimeout(async () => {
     try {
-      await saveState(state)
+      // Adopt whatever comes back: unchanged when the save was clean, and the merged colony when
+      // another tab had written since this one loaded. Dropping it would leave this page
+      // asserting a picture the file has already moved past, and the next save would fight.
+      state = await saveState(state)
     } catch {
       /* the colony still runs; only the archive list is at risk, and it retries next time */
     }
@@ -1370,6 +1454,9 @@ settings.onChange((changed, scope) => {
   colony.onSettingsChanged(changed, scope)
   sound.onSettingsChanged(changed)
   if (changed.has('showFps')) hud.syncSettings()
+  // Folding dormant repos away changes which threads are on the map, so the colony has to be
+  // rebuilt from the list rather than merely re-rendered.
+  if (changed.has('hideDormant')) applyThreads(threads)
   if (changed.has('maxAgents')) applyThreads(threads)
 })
 

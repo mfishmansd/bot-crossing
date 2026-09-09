@@ -19,8 +19,8 @@
  *   | any timestamp      | the file's own mtime and birthtime                             |
  *   | a title            | the first user prompt, unwrapped from `<user_query>`           |
  *   | focus history      | `unread` is genuinely unknowable, so it stays `false`          |
- *   | a live-process file| `running` falls back to "written in the last few minutes"       |
- *   | an archived flag   | `setArchived` says so and the colony records it on its own side |
+ *   | a live-process file| `running` reads the `turn_ended` marker, or falls back to mtime   |
+ *   | an archived flag   | no `setArchived`; the colony records the archive on its own side  |
  *
  * That list is the honest cost of the adapter, not a to-do: three of the five are the same
  * concessions `claude-code.mjs` already makes for threads started from a terminal.
@@ -54,6 +54,13 @@ const TAIL_BYTES = 8 * 1024
  * lie the colony tells you every poll, and a quiet one is a lie it tells you once.
  */
 const ACTIVE_WINDOW_MS = 5 * 60 * 1000
+/**
+ * Recent transcripts close every turn with a `turn_ended` record, and for those the file says
+ * whose turn it is outright: an unclosed turn is mid-turn, a closed one is not — however recently
+ * it was written. Cursor writes nothing when it is killed, so an open turn still needs a bound,
+ * and it can be a generous one because a finished turn no longer depends on it.
+ */
+const OPEN_TURN_MS = 30 * 60 * 1000
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -239,11 +246,25 @@ function promptText(raw) {
     .trim()
 }
 
+/**
+ * `Tuesday, Sep 8, 2026, 4:08 PM (UTC-7)`, if the first turn carried one. Cursor puts the wall
+ * clock inside the prompt's wrapper tags rather than on the record, so it is read off the raw
+ * text before the tags are stripped. Nothing else in the file is a timestamp.
+ */
+function stampOf(raw) {
+  const m = /<timestamp>(.*?)<\/timestamp>/.exec(raw)
+  const t = m ? Date.parse(m[1].replace(/\s*\(UTC[^)]*\)\s*$/, '')) : NaN
+  return Number.isNaN(t) ? 0 : t
+}
+
 /** A prompt makes a poor title at full length; cut it at a sentence or a word, never mid-word. */
 function titleFrom(prompt) {
   if (!prompt) return 'Untitled thread'
+  // A question stays a question: `what project is this?` reads wrong with the mark cut off.
+  // A full stop goes, because a title is not a sentence.
   const stop = prompt.search(/[.!?\n]/)
-  const first = stop > 0 && stop < 80 ? prompt.slice(0, stop) : prompt
+  const keep = stop > 0 && /[!?]/.test(prompt[stop]) ? 1 : 0
+  const first = stop > 0 && stop < 80 ? prompt.slice(0, stop + keep) : prompt
   if (first.length <= 80) return first
   const cut = first.slice(0, 80)
   return `${cut.slice(0, cut.lastIndexOf(' ')) || cut}…`
@@ -254,9 +275,9 @@ function titleFrom(prompt) {
  * counts: 23 of the 25 failed turns on a real machine were `User aborted request`, and
  * badging every cancelled turn as blocked would drown the two that actually broke.
  */
-function endedBadly(tail) {
+function endedBadly(records) {
   let last = null
-  for (const r of jsonLines(tail)) {
+  for (const r of records) {
     if (r?.type === 'turn_ended') last = r
   }
   if (!last || last.status === 'success') return ''
@@ -282,19 +303,27 @@ async function transcriptMeta(file, stat) {
   const hit = metaCache.get(file)
   if (hit && hit.key === key) return hit.meta
 
-  const meta = { prompt: '', error: '', turns: 0 }
+  const meta = { prompt: '', error: '', turns: 0, startedAt: 0, modern: false, closed: true }
   try {
     const records = jsonLines(await readHead(file, HEAD_BYTES))
     for (const r of records) {
       if (r?.role === 'user' && r.message) {
-        const text = promptText(firstText(r.message.content))
+        const raw = firstText(r.message.content)
+        const text = promptText(raw)
         if (text) {
           meta.prompt = text
+          meta.startedAt = stampOf(raw)
           break
         }
       }
     }
-    meta.error = endedBadly(await readTail(file, TAIL_BYTES, stat.size))
+    const tail = jsonLines(await readTail(file, TAIL_BYTES, stat.size))
+    // `turn_ended` is a recent addition: transcripts from before it exist in numbers and carry
+    // none at all. Treating "no marker" as "mid-turn" would light up every old thread on the
+    // map, so a file is only read that way once it has proved it writes them.
+    meta.modern = tail.some((r) => r?.type === 'turn_ended')
+    meta.closed = tail.length > 0 && tail[tail.length - 1]?.type === 'turn_ended'
+    meta.error = endedBadly(tail)
   } catch {
     /* a transcript being appended to right now is a normal thing to trip over */
   }
@@ -345,12 +374,16 @@ async function scanThreads() {
         gitBranch: branch,
         model: '',
         effort: '',
-        // Cursor stamps nothing, so the filesystem is the clock. Birthtime is not portable —
-        // where it is missing it reads as 0 and the mtime stands in for both ends.
-        createdAt: Math.round(stat.birthtimeMs) || Math.round(stat.mtimeMs),
+        // The first prompt carries the wall clock; failing that the filesystem is the clock.
+        // Birthtime is not portable — where it is missing it reads as 0 and the mtime stands in.
+        createdAt: meta.startedAt || Math.round(stat.birthtimeMs) || Math.round(stat.mtimeMs),
         lastActivityAt: Math.round(stat.mtimeMs),
         lastFocusedAt: 0,
-        running: now - stat.mtimeMs < ACTIVE_WINDOW_MS,
+        // A transcript that closes its turns says whether one is open; one that does not can
+        // only be judged by how recently it moved.
+        running: meta.modern
+          ? !meta.closed && now - stat.mtimeMs < OPEN_TURN_MS
+          : now - stat.mtimeMs < ACTIVE_WINDOW_MS,
         // No focus history exists to compare against, so this is unknowable rather than false.
         // Claiming it would put a `?` over every Cursor thread you have ever opened.
         unread: false,
@@ -416,6 +449,9 @@ function cursorOnPath() {
 }
 
 export function openFolder(dir) {
+  // The page named this folder. The server checks a new-session folder exists before it gets
+  // here, but a thread's `cwd` rides inside `ref`, so the shape is checked again at the door.
+  if (typeof dir !== 'string' || !path.isAbsolute(dir)) return { ok: false, error: 'That folder is not somewhere Cursor can open' }
   const cli = cursorOnPath()
   if (cli) return { ok: true, command: [cli, dir] }
   // The OS opener with the app named: LaunchServices does the finding, not this file.
@@ -430,14 +466,6 @@ function fileUrl(dir) {
   return `cursor://file${rooted.split('/').map(encodeURIComponent).join('/')}`
 }
 
-/**
- * `cursor-agent` has no archived list to put a thread in. Saying so is the documented answer:
- * the colony records the archive itself and the astronaut still walks back up the ramp.
- */
-async function setArchived() {
-  return { ok: false, error: 'cursor-agent has no archived state — hidden in the colony only' }
-}
-
 export default {
   id: 'cursor',
   name: 'Cursor',
@@ -445,6 +473,5 @@ export default {
   scanThreads,
   openThread,
   newSession,
-  setArchived,
   paths: { CURSOR_PROJECTS },
 }

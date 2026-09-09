@@ -17,8 +17,10 @@ import { createBuilding, buildingUniforms, Scaffolds } from '../world/buildings.
 import { Ship } from '../world/ship.js'
 import { Astronauts } from '../agents/astronauts.js'
 import { Indicators, BADGE } from '../agents/indicators.js'
+import { MAX_AGENT_CAP } from '../core/settings.js'
 import { Particles } from '../agents/particles.js'
 import { Navigation } from '../agents/navigation.js'
+import { liveThreadsForColony } from './hidden-projects.js'
 
 /**
  * The colony: everything that turns a list of agent threads into a place.
@@ -195,7 +197,11 @@ export class Colony {
     this.deckSince = 0
     this.astronauts = new Astronauts(scene, settings)
     this.astronauts.world = this._world()
-    this.indicators = new Indicators(scene, settings, Math.max(64, settings.get('maxAgents')))
+    // Sized for the largest preset rather than the current one: unlike the astronaut meshes these
+    // buffers are never rebuilt, so allocating against today's `maxAgents` means raising quality
+    // later silently starves the badges — the one `?` that wants you being the thing that goes
+    // missing. A badge is a single quad; the spare instances cost almost nothing.
+    this.indicators = new Indicators(scene, settings, MAX_AGENT_CAP)
     this.particles = new Particles(scene, settings)
     this.scaffolds = new Scaffolds(scene, 320)
     this.nav = new Navigation()
@@ -317,9 +323,9 @@ export class Colony {
    * ids — repo name for plots, session id for buildings — so a poll that changes nothing
    * moves nothing on screen.
    */
-  setThreads(threads, archivedIds = new Set()) {
+  setThreads(threads, archivedIds = new Set(), hiddenProjects = new Set(), knownIds = new Set()) {
     const now = Date.now()
-    const live = threads.filter((t) => !t.archived && !archivedIds.has(t.id))
+    const live = liveThreadsForColony(threads, archivedIds, hiddenProjects)
 
     // Group by repo, biggest project first so the busiest work lands nearest the middle.
     const byProject = new Map()
@@ -328,12 +334,47 @@ export class Colony {
       if (!byProject.has(key)) byProject.set(key, [])
       byProject.get(key).push(thread)
     }
+    /**
+     * Repos where nothing has stirred in days, folded away on request.
+     *
+     * A colony is a map you learn, and a map is only learnable if what is on it is worth
+     * looking at. Someone with a hundred checkouts has most of the ground given over to work
+     * they finished in the spring, and the six repos they are actually living in are somewhere
+     * in among it. Dormant is already a status the colony understands — nothing for three days
+     * — so this is that same line drawn one level up, at the repo rather than the thread.
+     *
+     * Deliberately all-or-nothing per repo: a zone with one live thread in it stays whole,
+     * because half a zone would misrepresent the repo rather than tidy the map.
+     */
+    const dormant = new Set()
+    if (this.settings.get('hideDormant')) {
+      for (const [name, list] of byProject) {
+        if (list.every((t) => statusFor(t, now) === 'sleeping')) dormant.add(name)
+      }
+      // Never fold away everything: a colony that answers a poll with an empty planet reads as
+      // broken rather than tidy, and there is nothing on screen to tell you which it was.
+      if (dormant.size === byProject.size) dormant.clear()
+      for (const name of dormant) byProject.delete(name)
+    }
+    this.dormantProjects = dormant
+
     const projects = [...byProject.entries()].sort((a, b) => {
       if (b[1].length !== a[1].length) return b[1].length - a[1].length
       return a[0].localeCompare(b[0])
     })
 
     this._syncPlots(projects)
+
+    // A repo that is off the map keeps its footprint in layout memory, so showing it again
+    // reclaims the same ground if it is still free. Re-inserting the entry also keeps
+    // LAYOUT_MEMORY from evicting a name you only hid — otherwise a zone folded away for a
+    // week loses where it used to be, and comes back somewhere else entirely.
+    for (const name of [...hiddenProjects, ...dormant]) {
+      const cells = this.plotCells.get(name)
+      if (!cells) continue
+      this.plotCells.delete(name)
+      this.plotCells.set(name, cells)
+    }
 
     const roster = []
     const seenBuildings = new Set()
@@ -370,6 +411,8 @@ export class Colony {
           // Where the work actually is. A working astronaut circles it rather than standing
           // at one spot, so it needs the building, not just a place to stand near it.
           anchor: building.mesh.position.clone(),
+          // Already on the colony's books, so it does not need an entrance.
+          known: knownIds.has(thread.id),
         })
       })
     }

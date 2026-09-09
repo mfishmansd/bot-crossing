@@ -2,12 +2,13 @@
 
 **[botcrossing.com](https://botcrossing.com)**
 
-Every coding-agent thread on this Mac is a little astronaut. They walk out of the ship, claim
+Every coding-agent thread on this machine is a little astronaut. They walk out of the ship, claim
 a plot for their repo, and build something. When one needs you it stops and holds a `?` over
 its head; click it and the thread opens back in whichever harness it came from.
 
 It reads the harness's own files, on your own machine. Nothing is uploaded, there is no
-account, and the only thing it ever writes back is a single archive flag.
+account, and **it never writes to a harness at all** — `data/colony.json`, where the map lives,
+is the only file it writes anywhere.
 
 > **Status:** published as-is. I built this for myself and cannot promise to maintain it —
 > issues and PRs are welcome but may go unanswered, and forking is an entirely reasonable
@@ -19,6 +20,10 @@ account, and the only thing it ever writes back is a single archive flag.
 npm install && npm run dev
 ```
 
+Needs Node 20 or newer. Codex's thread index is SQLite, and reading it needs Node 22.13 or
+newer for `node:sqlite`; on an older Node the CLI transcripts still show and the page says
+what is missing. `npm test` runs the suite.
+
 `npm run dev` is the whole thing: the API lives inside the Vite dev server, so there is no
 second process. For a built version, `npm start` (build + serve) or `npm run serve` if
 `dist/` already exists. Binds to `127.0.0.1` by default, and answers only its own page — see
@@ -26,9 +31,9 @@ second process. For a built version, `npm start` (build + serve) or `npm run ser
 
 **macOS, Linux and Windows.** Opening a thread, revealing a folder and starting a new session
 all go through a `harness://` deep link handed to the OS opener — `open(1)` on macOS,
-`xdg-open` on Linux, ShellExecute on Windows. The scanning half was portable already. Note that
-the deep link needs a desktop app registered for that scheme, so on Linux the folder buttons
-work while opening a thread has nothing to reach yet.
+`xdg-open` on Linux, ShellExecute on Windows. The scanning half was portable already. On Linux,
+where a desktop app often is not installed, the scheme is checked first and a terminal running
+the harness's own CLI opens instead when nothing answers it.
 
 A harness whose deep link opens the app but not the place may hand back a command instead,
 and the server runs that detached. Cursor is the one that does: its `cursor://file/…` link
@@ -45,8 +50,8 @@ somebody writing that adapter.
 
 | Harness | Status |
 | --- | --- |
-| **[Claude Code](https://claude.com/claude-code)** (Anthropic) | ✅ **Supported** — desktop app and CLI, including worktrees, live-process detection and archiving |
-| [Codex CLI](https://developers.openai.com/codex/cli) (OpenAI) | ⬜ Not yet — transcripts found at `~/.codex/sessions/`, [notes here](server/harnesses/README.md#starting-points) |
+| **[Claude Code](https://claude.com/claude-code)** (Anthropic) | ✅ **Supported** — desktop app and CLI, including worktrees and live-process detection |
+| **[Codex](https://developers.openai.com/codex/cli)** (OpenAI) | ✅ **Supported** — desktop, VS Code and CLI sessions, opened through `codex://` |
 | [OpenCode](https://opencode.ai) | ⬜ Not yet |
 | [Antigravity CLI](https://antigravity.google) (Google) | ⬜ Not yet — the successor to Gemini CLI, which Google stopped serving individual accounts on 18 June 2026 |
 | [Cursor](https://cursor.com) (`cursor-agent`) | ✅ **Supported** — the CLI's own sessions. Cursor writes no live-process file, so "running" is inferred from having been written in the last few minutes, and it keeps no archived state, so archiving is recorded on the colony's side only. The IDE's chats are not read: they live in a SQLite database the editor holds open and which runs to tens of gigabytes on a well-used machine. Open and New conversation go through the `cursor` command on your `PATH` — see [Run it](#run-it) |
@@ -240,10 +245,24 @@ browser makes without touching layout, so following a walking astronaut costs no
 - **What is this place?** (`R`) is the astronaut answering for the repo it is standing on:
   the opening line of that README, in its own card. **Read the whole readme** hands you over
   to the panel.
-- **Open** hands the thread back to Claude Code and the desktop app comes forward.
+- **Open** hands the thread back to whichever harness owns it and its app comes forward. On a
+  Linux box with no desktop app to answer the deep link, a terminal opens with the CLI resuming
+  the session instead.
+- **Viewed** (`V`), on a thread that is asking for you, puts its hand down. The harness only
+  counts a thread as read once it has been focused in its own app, so one you answered in a
+  terminal waves for good. This records when you looked, and the thread starts asking again the
+  moment it does something newer.
 - **Archive** sets `isArchived` on Claude Code's own session record — the thread lands in
   Claude Code's Archived list, not just here — and the astronaut walks back up the ramp and
-  boards the ship.
+  boards the ship. A thread you archive in the harness's own app goes home on the next poll too,
+  because the scan reads that flag.
+- **Hide** takes a whole repo off the map without touching a single thread. It comes back from
+  the list at the foot of the sidebar, onto the same ground it left.
+
+**Quiet repos fold away** by default: a repo where every thread has been silent for three days
+comes off the map, which on a machine with a few harnesses and a lot of checkouts is most of
+them. The sidebar keeps a count and a way back, and a repo returns to its own ground the moment
+a thread in it wakes up. *Hide dormant repos* in settings turns it off.
 
 Only one button in the panel is ever the accent colour: whichever action is the immediate
 one. `Esc` steps outward a notch at a time — the thread first, then its zone.
@@ -310,6 +329,7 @@ under **View → Return to isometric**.
 | `S` | Settings |
 | `N` | Fly to the next astronaut waiting on you |
 | `Enter` / `A` | Open / archive the selected thread |
+| `V` | Mark the selected thread viewed, so it stops asking |
 | `C` | New conversation in the open zone's folder |
 | `R` | Ask the selected astronaut what the repo it is standing on is |
 | `G` | Walk as an astronaut. `WASD` to move, `⇧` to run, `space` to hop — hold it to fly — `Esc` to let go |
@@ -636,8 +656,9 @@ the boards on the surface: readable from anywhere in the room and never appearin
 
 ## Planets and light
 
-Three worlds — **Luna**, **Mars**, **Terra** — and a full day/night cycle you can scrub or
-let run. A planet is a bag of colours and two switches; terrain, scatter, sky and lighting all
+Three worlds — **Luna**, **Mars**, **Terra** — and a full day/night cycle you can scrub, let
+run, or set to **Live**, which follows this machine's own clock so the colony's light matches
+the light out of your window. A planet is a bag of colours and two switches; terrain, scatter, sky and lighting all
 read from the same preset, so a fourth world is a data change rather than a code change.
 
 ### The sky is the HDRI

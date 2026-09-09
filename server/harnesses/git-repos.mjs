@@ -611,15 +611,6 @@ function newSession(dir) {
   return { ok: true, url: `claude://code/new?${new URLSearchParams({ folder: dir })}` }
 }
 
-/**
- * A repo has no archived list of its own, and inventing one would mean writing to somebody's
- * project to satisfy a viewer. Saying so is the documented answer: the colony records the
- * archive on its own side and the astronaut still walks back up the ramp.
- */
-async function setArchived() {
-  return { ok: false, error: 'A repo has no archived state of its own — hidden in the colony only' }
-}
-
 export default {
   id: 'git-repos',
   name: 'Projects',
@@ -628,6 +619,5 @@ export default {
   scanThreads,
   openThread,
   newSession,
-  setArchived,
   paths: { roots: configuredRoots() },
 }

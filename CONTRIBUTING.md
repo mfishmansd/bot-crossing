@@ -14,7 +14,7 @@ Concretely:
 
 - **Issues** — I read them. I may not act on them, and I may not reply.
 - **Pull requests** — genuinely welcome, and I will try to look. **I use an AI agent to do the
-  first review pass**, and I read its summary before merging anything. I am telling you that
+  first review pass**, and I read its summary before deciding anything. I am telling you that
   because you deserve to know how your work is being evaluated. A human — me — makes the call
   on whether it merges.
 - **Response times** — no promises. Days, weeks, or never, depending on what else is going on.
@@ -31,25 +31,33 @@ written down here.
 
 ## What is most worth contributing
 
-**Harness adapters, by a wide margin.** Right now Bot Crossing only reads Claude Code. The
-whole point of the seam in `server/harnesses/` is that adding Codex CLI, OpenCode, Antigravity,
-Amp, or anything else should be one new file and one line in a registry.
+**Harness adapters, by a wide margin.** Bot Crossing reads Claude Code, Codex and Cursor, and
+your projects directory. The whole point of the seam in `server/harnesses/` is that adding
+OpenCode, Antigravity, Amp or anything else should be one new file and one line in a registry.
 
 Everything you need is in **[`server/harnesses/README.md`](server/harnesses/README.md)** — the
 interface, the thread shape, the ground rules, and how to find where a given harness keeps its
 sessions on disk.
 
-One caveat worth knowing before you start: **the interface has only ever been implemented once**,
-by the Claude Code adapter it was extracted from. It is very likely the first genuinely different
-harness will not fit perfectly. If yours does not, that is a bug in the seam and not in your
-work — say so in the PR and change what you need to. I would much rather widen the interface
-than have you contort an adapter around it.
+The decisions that are already settled — and why — are in **[DECISIONS.md](DECISIONS.md)**.
+Worth a skim before you start; it will save you writing something I have to say no to.
+
+Two hard rules, and I will not bend on either — both are there because breaking them has
+already cost somebody's machine something:
+
+- **Nothing is written to a harness beyond its own archived flag.** Not a transcript, not a
+  session record, not a second key. `data/colony.json` and that one flag are the only things
+  this project writes, and the flag goes through `setArchived` or not at all.
+- **Nothing is ever read from or executed inside another application's bundle.** Only files
+  under the user's own home directory. Opening a thread goes through a URL the OS resolves, or
+  a command the user already has on `PATH`.
+
+Beyond those, if the interface does not fit your harness, that is a bug in the seam and not in
+your work — say so in the PR and change what you need to. I would much rather widen the
+interface than have you contort an adapter around it.
 
 Also useful:
 
-- **Linux and Windows support.** The scanning half is portable; the opening half is not. Every
-  "open this thread", "reveal this folder" and "start a session here" path goes through macOS's
-  `open(1)` in `server/api.mjs`. That is the whole blocker.
 - **Bug fixes**, especially anything where the colony misrepresents what a thread is actually
   doing. That is the one thing the project has to get right.
 - **Performance**, if you can measure it. See the Performance section of the README for the kind
@@ -68,22 +76,22 @@ You need a real harness installed with real threads for anything interesting to 
 because the built files are checked in and the raw packs are not. You only need it if you are
 changing the art pipeline, and the README explains where to re-download the packs.
 
-There is no test suite and no linter. That is not a standard I am asking you to meet — it is
-just the state of things, and I would rather tell you than have you guess.
+`npm test` runs the suite — the colony file's merge and migration, and the harness contract
+against fixtures. It is not exhaustive and there is no linter. New tests are welcome but not
+demanded; keeping the existing ones green is.
 
 ## What makes a PR easy to say yes to
 
 - **One thing at a time.** A harness adapter, or a bug fix, or a refactor — not all three.
-- **Say what you verified and how.** There are no tests to lean on, so your description is the
-  evidence. "Ran it against 40 real Codex sessions, screenshots attached" is worth more than a
+- **Say what you verified and how.** The suite does not cover much, so your description is
+  still most of the evidence. "Ran it against 40 real Codex sessions, screenshots attached" is worth more than a
   clean diff.
 - **Match the surrounding code.** No semicolons, single quotes, 2-space indent, 110ish columns.
   Comments in this codebase explain *why* — particularly why an obvious approach was rejected.
   That style is deliberate; please keep it where you touch things.
 - **Do not add dependencies casually.** The runtime has two, and I would like it to stay small.
-- **Do not widen what gets written to disk.** The project reads your harness's files and writes
-  exactly one archive flag. That restraint is a feature and I will push back hard on changes to
-  it.
+- **Do not widen what gets written to disk.** See the two hard rules above. That restraint is
+  the feature.
 
 ## Licensing
 

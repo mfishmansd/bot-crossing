@@ -194,6 +194,9 @@ export class Indicators {
     let n = 0
 
     for (const agent of agents) {
+      // Cleared for everyone first: an agent that loses its badge this frame must lose its
+      // hit box with it, or the picker keeps offering a bubble that is no longer drawn.
+      agent.badgeSize = 0
       if (n >= this.capacity) break
       if (agent.scale < 0.4 || agent.state === 'gone') continue
       const badge = statusFor(agent)
@@ -217,6 +220,12 @@ export class Indicators {
       // Urgent badges breathe a little so they pull the eye across a busy colony.
       sizes[n] = urgent ? 0.166 + Math.sin(elapsed * 4.2 + agent.phase) * 0.013 : 0.126
       fades[n] = FADE_BY_BADGE[badge] ?? 1
+
+      // Handed to the picker so a click can hit the bubble itself rather than the head under
+      // it. It cannot be derived over there: the lift and the size are decided in view space
+      // by the vertex shader above, and only this loop knows which frame each agent got.
+      agent.badgeSize = sizes[n]
+      agent.badgeY = centers[n * 3 + 1]
 
       const c = BADGE_COLOR[badge] || [1, 1, 1]
       this._color.setRGB(c[0], c[1], c[2])

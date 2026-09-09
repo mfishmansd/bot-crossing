@@ -158,7 +158,56 @@ function hexDistance(a, b) {
  * @param previous Map of id → cells from the last pass (or a saved colony file).
  * @returns Map of id → cells.
  */
+/**
+ * Is the colony one landmass?
+ *
+ * Every zone is a contiguous blob of its own, but nothing has ever guaranteed the *union* of
+ * them is — that held only because zones seed outward in spiral order from the middle, which
+ * happens to leave no gaps when everybody who was ever placed is still on the map.
+ *
+ * Take repos away and the guarantee goes with it. The survivors keep the cells they held in the
+ * bigger layout, which is the whole point of the stickiness, but if the zones between them have
+ * gone those cells are now islands floating in the sea. That is what folding away dormant repos
+ * does the first time it runs.
+ *
+ * The ship's cell counts as walkable here even though nobody may claim it: a colony that
+ * happens to wrap around the ship is not two colonies.
+ */
+function isConnected(out) {
+  const cells = new Map()
+  for (const [, list] of out) for (const c of list) cells.set(key(c.q, c.r), c)
+  if (cells.size < 2) return true
+  const ship = key(SHIP_CELL.q, SHIP_CELL.r)
+  const passable = new Set([...cells.keys(), ship])
+  const [start] = cells.keys()
+  const seen = new Set([start])
+  const queue = [cells.get(start)]
+  while (queue.length) {
+    const c = queue.pop()
+    for (const [dq, dr] of HEX_DIRS) {
+      const n = { q: c.q + dq, r: c.r + dr }
+      const k = key(n.q, n.r)
+      if (!passable.has(k) || seen.has(k)) continue
+      seen.add(k)
+      queue.push(n)
+    }
+  }
+  // The ship is a stepping stone, not a member: it does not have to be reached for the colony
+  // to be whole, and it does not count toward what has to be.
+  seen.delete(ship)
+  return seen.size === cells.size
+}
+
 export function allocateCells(projects, previous = new Map()) {
+  const laid = layOut(projects, previous)
+  // Remembering where a zone sat is worth a great deal, right up until it leaves the colony
+  // as scattered islands. Then the memory is describing a map that no longer exists, and
+  // starting over — compact, from the middle, the way a first run does it — is the lesser
+  // upheaval. It only happens when the alternative is visibly broken.
+  return isConnected(laid) ? laid : layOut(projects, new Map())
+}
+
+function layOut(projects, previous) {
   const reserved = key(SHIP_CELL.q, SHIP_CELL.r)
   const wanted = projects.map((p) => ({ id: p.id, want: cellsNeeded(p.size) }))
   const total = wanted.reduce((n, w) => n + w.want, 0)

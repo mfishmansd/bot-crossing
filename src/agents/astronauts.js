@@ -57,10 +57,16 @@ const AGENT_LOOK = {
   leaving: { trim: 0x6f7f75, eye: [1.0, 1.0, 1.1] },
 }
 
-/** Where the status badge floats, matching `indicators.js` — the picker aims there too. */
-const BADGE_HEIGHT = 1.52
 const WALK_SPEED = 2.1
 const TURN_RATE = 7.5
+/**
+ * How many astronauts may walk out of the ship in one reconcile. The rest of a big arrival —
+ * a reload, a first run, a hidden repo being shown again — are placed on their plots instead.
+ */
+const MAX_ENTRANCE = 6
+/** Around the ramp, where an astronaut standing still blocks everyone still coming out. */
+const DOORWAY_CLEAR = 5.5
+
 /** How close counts as "reached this waypoint". A shade over one nav cell. */
 const WAYPOINT_REACHED = 0.55
 /**
@@ -203,6 +209,7 @@ export class Astronauts {
     this._wp = new THREE.Vector3()
     this._sep = new THREE.Vector3()
     this._pickBadge = new THREE.Vector3()
+    this._pickLifted = new THREE.Vector3()
     /** Uniform bucket grid for the separation query, so it stays O(n) as the crew grows. */
     this._buckets = new Map()
     this.nav = null
@@ -603,14 +610,29 @@ export class Astronauts {
     this.roster = entries
     this.world = world || this.world
     const cap = Math.min(this.capacity, this.settings.get('maxAgents'))
-    const wanted = entries.slice(0, cap)
+    // Agents on their way back to the ship still hold a slot, so the roster has to leave room
+    // for them. Without this the clamp above would quietly drop whoever sorted last, which is
+    // better than an empty planet but still not what the scan said.
+    const leaving = this.agents.reduce((n, a) => n + (a.state === 'leaving' ? 1 : 0), 0)
+    const wanted = entries.slice(0, Math.max(1, cap - leaving))
     const seen = new Set()
 
+    // The ramp is one door and the ship is a solid obstacle around it, so an entrance is a
+    // queue. A handful arriving together is the shot the colony is for; a hundred is a scrum
+    // that shoves its own members into the ship's footprint, where they give up, sit down and
+    // become the obstacle for everybody behind them. Past this many, the rest are simply
+    // already outside — which is what a thread the colony has seen before is anyway.
+    let entrances = MAX_ENTRANCE
     for (const entry of wanted) {
       seen.add(entry.id)
       const existing = this.byId.get(entry.id)
-      if (existing) this._updateAgent(existing, entry)
-      else this._spawnAgent(entry)
+      if (existing) {
+        this._updateAgent(existing, entry)
+        continue
+      }
+      const walksOut = !entry.known && entrances > 0
+      if (walksOut) entrances--
+      this._spawnAgent(entry, walksOut)
     }
 
     for (const agent of this.agents) {
@@ -619,9 +641,15 @@ export class Astronauts {
     return this.agents.length
   }
 
-  _spawnAgent(entry) {
+  _spawnAgent(entry, walksOut = true) {
     const door = this.world?.shipDoor?.() || new THREE.Vector3(0, 0, 0)
     const jitter = () => (Math.random() - 0.5) * 1.4
+    // Straight onto its plot, a pace off the exact spot so a zone's crew does not appear in a
+    // stack. The nav grid sorts out anything that lands on a building.
+    const site = entry.site || door
+    const start = walksOut
+      ? new THREE.Vector3(door.x + jitter(), 0, door.z + jitter())
+      : new THREE.Vector3(site.x + jitter(), 0, site.z + jitter())
 
     const agent = {
       id: entry.id,
@@ -632,14 +660,15 @@ export class Astronauts {
       anchor: entry.anchor ? entry.anchor.clone() : null,
       workSpot: new THREE.Vector3(),
       workAt: 0,
-      pos: new THREE.Vector3(door.x + jitter(), 0, door.z + jitter()),
+      pos: start,
       vel: new THREE.Vector3(),
       yaw: Math.random() * Math.PI * 2,
       targetYaw: 0,
       speed: WALK_SPEED * (0.86 + Math.random() * 0.28),
       phase: Math.random() * Math.PI * 2,
       bob: 0,
-      state: 'spawning',
+      // An astronaut already outside does not play the entrance; it is just there.
+      state: walksOut ? 'spawning' : 'walking',
       stateAge: 0,
       // Every astronaut runs its own clocks so a crowd never blinks in unison.
       blinkAt: 1 + Math.random() * 4,
@@ -681,12 +710,12 @@ export class Astronauts {
       driftBlocked: false,
       // Animation state: which baked clip, how far into it, and the row of the bone table
       // that lands on. Started at a random offset so a crowd never marches in step.
-      clipKey: 'spawn',
+      clipKey: walksOut ? 'spawn' : 'idle',
       clipTime: Math.random() * 0.6,
       frame: 0,
       wander: new THREE.Vector3(),
       wanderAt: 0,
-      scale: 0, // pops up out of the ship
+      scale: walksOut ? 0 : 1, // pops up out of the ship, or was already standing there
       alive: true,
       path: null,
       pathAt: 0,
@@ -751,6 +780,15 @@ export class Astronauts {
     if (agent.state !== 'spawning') agent.state = 'walking'
     agent.stateAge = 0
     agent.pathVersion = -1
+  }
+
+  /** Close enough to the ramp that standing still there is in somebody's way. */
+  _nearDoor(pos) {
+    const door = this.world?.shipDoor?.()
+    if (!door) return false
+    const dx = pos.x - door.x
+    const dz = pos.z - door.z
+    return dx * dx + dz * dz < DOORWAY_CLEAR * DOORWAY_CLEAR
   }
 
   _sendHome(agent) {
@@ -867,7 +905,18 @@ export class Astronauts {
         // and the next poll hands it a site that has been checked against the grid.
         const stuck = (agent.blocked && agent.stateAge > 8) || agent.stateAge > 45
         if (dist < ARRIVE_RADIUS || stuck) {
-          if (stuck && dist >= ARRIVE_RADIUS) agent.site.copy(agent.pos)
+          // Adopting the ground it reached is right for a site something got built on top of.
+          // It is exactly wrong next to the ship: an astronaut still shouldering its way out
+          // of the doorway would claim the doorway, and the queue behind it inherits a
+          // permanent wall. Out there it keeps its real site and tries again, which the crowd
+          // thinning out is usually enough to fix.
+          const inDoorway = this._nearDoor(agent.pos)
+          if (stuck && dist >= ARRIVE_RADIUS && !inDoorway) agent.site.copy(agent.pos)
+          if (stuck && inDoorway) {
+            agent.stateAge = 0
+            agent.pathVersion = -1
+            break
+          }
           agent.state = agent.status === 'leaving' ? 'leaving' : 'at-site'
           agent.stateAge = 0
         }
@@ -1562,6 +1611,16 @@ export class Astronauts {
     let staticDirty = false
     if (this.logo) this.logo.visible = false
     for (const agent of this.agents) {
+      // Never write past the end of the instance buffers. Going over is not a rendering
+      // artefact you can squint past: WebGL refuses the whole `drawElementsInstanced` call, so
+      // one agent too many takes *every* astronaut off screen at once.
+      //
+      // It can go over. `setRoster` caps how many agents it will spawn, but an agent that has
+      // left the roster stays in this list while it walks back to the ship — and the slot it
+      // vacated in the roster is immediately filled by a thread that was previously past the
+      // cap. Archive one thread on a colony sitting at the cap and there is briefly one more
+      // agent than there are slots, which is exactly when the colony would empty.
+      if (i >= this.capacity) break
       if (agent.state === 'gone') continue
       const s = agent.scale
       if (s <= 0.001) continue
@@ -1679,6 +1738,7 @@ export class Astronauts {
     let bestScore = Infinity
     const v = this._v
     const b = this._pickBadge
+    const lifted = this._pickLifted
 
     for (const agent of this.agents) {
       if (agent.scale < 0.3 || agent.state === 'gone') continue
@@ -1691,11 +1751,40 @@ export class Astronauts {
 
       // The badge over an astronaut's head is what you actually aim at when one wants you —
       // it is bigger than the astronaut, it is the thing that caught your eye, and it sits
-      // clear of the crowd. So it picks the astronaut it belongs to.
-      b.set(agent.pos.x, agent.pos.y + BADGE_HEIGHT, agent.pos.z).project(camera)
-      if (b.z <= 1) {
-        const bd = Math.hypot((b.x - ndcX) * aspect, b.y - ndcY)
-        if (bd < d) d = bd
+      // clear of the crowd. So the whole bubble picks the astronaut it belongs to, not just
+      // a point at its middle.
+      //
+      // The geometry has to be recomputed the way `indicators.js` draws it rather than
+      // guessed at. That shader anchors the quad just above the helmet and then lifts it by
+      // half its own height *in view space*, where the height itself grows with distance so
+      // the badge holds a constant pixel size. A fixed world-space offset cannot follow that:
+      // it is right at one zoom and most of a metre low at another, which is why this used to
+      // demand a click on the astronaut's head.
+      const size = agent.badgeSize || 0
+      if (size > 0) {
+        // View space, exactly as the vertex shader has it.
+        b.set(agent.pos.x, agent.badgeY, agent.pos.z).applyMatrix4(camera.matrixWorldInverse)
+        const scale = size * (2 + -b.z * 0.22)
+        b.y += scale * 0.5
+        // A second point one half-height higher gives the quad's on-screen radius without
+        // re-deriving the projection: whatever the camera does to one, it does to both.
+        lifted.copy(b)
+        lifted.y += scale * 0.5
+        b.applyMatrix4(camera.projectionMatrix)
+        lifted.applyMatrix4(camera.projectionMatrix)
+        if (b.z <= 1) {
+          // The quad is square, and `bx` is already in the same units as `by`, so one
+          // half-extent covers both axes.
+          const half = Math.abs(lifted.y - b.y)
+          const bx = (b.x - ndcX) * aspect
+          const by = b.y - ndcY
+          // Anywhere inside the bubble is a hit outright; outside it, the distance to its
+          // edge, so a near-miss still competes with a nearer astronaut on the same pixel.
+          const ox = Math.max(0, Math.abs(bx) - half)
+          const oy = Math.max(0, Math.abs(by) - half)
+          const bd = Math.hypot(ox, oy)
+          if (bd < d) d = bd
+        }
       }
       if (d > maxDist) continue
       // Break ties by depth so the nearer of two overlapping agents wins.

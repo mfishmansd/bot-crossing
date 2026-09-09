@@ -20,18 +20,26 @@ import { HARNESSES, detectedHarnesses, harnessById } from './harnesses/index.mjs
  * move every plot on everybody's map to fix something most people never hit.
  */
 function disambiguateProjects(threads) {
+  // Windows hands the same checkout back as `c:\…` from one transcript and `C:\…` from
+  // another: the CLI's project-directory encoding keeps whatever case the drive letter was
+  // given. Those are one path, not two — and counted as two they make an unambiguous name look
+  // ambiguous, which renames a plot on a machine that has no collision at all.
+  const canonical = (p) => (/^[A-Za-z]:[\\/]/.test(p) ? p[0].toLowerCase() + p.slice(1) : p)
+
   const pathsByName = new Map()
   for (const t of threads) {
     if (!t.project) continue
     if (!pathsByName.has(t.project)) pathsByName.set(t.project, new Set())
-    pathsByName.get(t.project).add(t.projectPath || '')
+    pathsByName.get(t.project).add(canonical(t.projectPath || ''))
   }
 
   const renames = new Map()
   for (const [name, paths] of pathsByName) {
     if (paths.size < 2) continue
     const list = [...paths]
-    const segments = list.map((p) => p.split('/').filter(Boolean))
+    // Both separators. A Windows path splits on neither otherwise, leaving a single "segment"
+    // that is the whole absolute path — which then becomes the plot's name on the map.
+    const segments = list.map((p) => p.split(/[\\/]/).filter(Boolean))
     const deepest = Math.max(...segments.map((s) => s.length))
 
     // Take one more trailing segment until every path in the group reads differently. Paths
@@ -50,7 +58,7 @@ function disambiguateProjects(threads) {
 
   if (!renames.size) return threads
   return threads.map((t) => {
-    const next = renames.get(`${t.project || ''}\u0000${t.projectPath || ''}`)
+    const next = renames.get(`${t.project || ''}\u0000${canonical(t.projectPath || '')}`)
     return next && next !== t.project ? { ...t, project: next } : t
   })
 }
@@ -82,7 +90,16 @@ export async function scanThreads() {
 /** What the HUD shows in the harness list: who is installed, and what they can do. */
 export async function harnessStatus() {
   const detected = new Set((await detectedHarnesses()).map((h) => h.id))
-  return HARNESSES.map((h) => ({ id: h.id, name: h.name, detected: detected.has(h.id) }))
+  return Promise.all(
+    HARNESSES.map(async (h) => ({
+      id: h.id,
+      name: h.name,
+      detected: detected.has(h.id),
+      // Optional. An adapter that can see its harness but cannot read it — wrong Node, a store
+      // it does not understand — says why here instead of failing silently on every poll.
+      error: h.diagnostic ? await h.diagnostic().catch(() => '') : '',
+    }))
+  )
 }
 
 /** The harness to use when a caller has not said — the first one present on this machine. */
@@ -97,22 +114,18 @@ const dispatch = (harnessId) => {
   return h
 }
 
-export const openThread = (harnessId, ref) => dispatch(harnessId).openThread(ref)
+/** Both may be async: an adapter that has to look for a CLI on disk cannot answer synchronously. */
+export const openThread = async (harnessId, ref) => dispatch(harnessId).openThread(ref)
 
-export const newSession = (harnessId, dir) => dispatch(harnessId).newSession(dir)
-
-export const setThreadArchived = (harnessId, ref, archived) => dispatch(harnessId).setArchived(ref, archived)
+export const newSession = async (harnessId, dir) => dispatch(harnessId).newSession(dir)
 
 /**
- * When a harness's own app last started, used to tell an archive it has already read from
- * one still waiting on disk. A harness with no long-lived app has nothing to report.
+ * Flip the harness's own archived flag, where the harness has one. An adapter that keeps no
+ * such state simply leaves `setArchived` out, and the colony records the archive on its own
+ * side — the astronaut goes home either way.
  */
-export async function harnessAppStartedAt(harnessId) {
-  const h = harnessById(harnessId)
-  if (!h?.appStartedAt) return 0
-  try {
-    return await h.appStartedAt()
-  } catch {
-    return 0
-  }
+export const setThreadArchived = async (harnessId, ref, archived) => {
+  const h = dispatch(harnessId)
+  if (typeof h.setArchived !== 'function') return { ok: false, error: `${h.name} keeps no archived state` }
+  return h.setArchived(ref, archived)
 }

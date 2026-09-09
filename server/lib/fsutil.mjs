@@ -21,6 +21,24 @@ export async function readHead(file, bytes) {
   }
 }
 
+/**
+ * The last `bytes` of a file, with a leading partial line dropped. The mirror of `readHead`,
+ * for the questions only the end of a transcript answers — whose turn it is right now.
+ */
+export async function readTail(file, bytes) {
+  const fh = await fsp.open(file, 'r')
+  try {
+    const { size } = await fh.stat()
+    const want = Math.min(bytes, size)
+    const buf = Buffer.allocUnsafe(want)
+    const { bytesRead } = await fh.read(buf, 0, want, size - want)
+    const text = buf.subarray(0, bytesRead).toString('utf8')
+    return want === size ? text : text.slice(text.indexOf('\n') + 1)
+  } finally {
+    await fh.close()
+  }
+}
+
 /** Parse a JSONL blob, skipping the partial or malformed lines a live file always has. */
 export function jsonLines(text) {
   const out = []
@@ -63,6 +81,32 @@ export async function exists(p) {
   } catch {
     return false
   }
+}
+
+/**
+ * Where an executable is, as an absolute path, or null. PATH first, then `extraDirs` — the
+ * places an installer puts a binary that a server started with a thin PATH (an IDE launcher, a
+ * service unit) would not see. Candidates are resolved rather than joined: the caller may spawn
+ * from a different working directory than this check ran in, and a relative PATH entry would
+ * then name two different files. X_OK alone passes for a directory, hence the stat.
+ *
+ * It never looks inside an application bundle, and no caller should hand it a path that does.
+ * Running a binary out of somebody else's `.app` is how you get the OS blaming us for it.
+ */
+export async function findExecutable(name, extraDirs = []) {
+  if (typeof name !== 'string' || !name) return null
+  const explicit = name.includes('/') || name.includes(path.sep)
+  const onPath = (process.env.PATH || '').split(path.delimiter).filter(Boolean)
+  for (const dir of explicit ? ['.'] : [...onPath, ...extraDirs]) {
+    const candidate = path.resolve(dir, name)
+    try {
+      await fsp.access(candidate, fsp.constants.X_OK)
+      if ((await fsp.stat(candidate)).isFile()) return candidate
+    } catch {
+      /* not here */
+    }
+  }
+  return null
 }
 
 export const num = (v) => {

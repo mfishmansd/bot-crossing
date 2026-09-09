@@ -20,8 +20,8 @@ export default {
   scanThreads,                   // () => Promise<Thread[]>
   openThread,                    // (ref) => { ok, url } | { ok: false, error }
   newSession,                    // (dir) => { ok, url } | { ok: false, error }
-  setArchived,                   // (ref, archived) => Promise<{ ok, error? }>
-  appStartedAt,                  // optional: () => Promise<number>
+  setArchived,                   // optional: (ref, archived) => Promise<{ ok, error? }>
+  diagnostic,                    // optional: () => Promise<string> — why the store is unreadable
 }
 ```
 
@@ -59,26 +59,25 @@ still exists.
 If your harness has no deep link, return `{ ok: false, error: '…' }` and say why — the UI
 shows the message rather than pretending the click worked.
 
-### `setArchived(ref, archived)`
+### `setArchived(ref, archived)` — optional
 
 Flip whatever "archived" means in that harness's own records, so the thread lands in *its*
-archived list rather than only disappearing here. If the harness has no such concept, return
-`{ ok: false, error: '…' }`: the colony still records the archive on its own side, and the
-astronaut still walks back to the ship.
+archived list rather than only disappearing here. If the harness has no such concept, leave the
+method out: the colony records the archive on its own side, and the astronaut still walks back
+to the ship.
 
-Be conservative about what you write. The Claude Code adapter touches exactly one key, writes
-through a temp file and renames over the original, and re-reads the record first to check it
-is the session it thinks it is. Someone's real work is in these files.
+This is the one write Bot Crossing makes outside `data/colony.json`, and it is kept deliberately
+narrow. The Claude Code adapter touches exactly one key, writes through a temp file and renames
+over the original, and re-reads the record first to check it is the session it thinks it is.
+Someone's real work is in these files. The desktop app rewrites its records from memory, so the
+server re-asserts the flag on every scan rather than trusting one write to stick.
 
-### `appStartedAt()` — optional
+### `diagnostic()` — optional
 
-Epoch milliseconds of when the harness's long-lived app last launched, or `0`.
-
-This exists for one specific problem: an app that loads its session records at startup and
-rewrites them from memory will silently stomp an archive flag set from outside. The colony
-re-asserts the flag every scan, and uses this timestamp to tell "already picked up" from
-"still waiting on disk" — which is what drives the *pending* look on an astronaut walking to
-the ship. A CLI-only harness has no such app; omit the method.
+A sentence explaining why the harness is present but cannot be read — the wrong Node for its
+store, a schema it does not understand — or `''`. Without it a broken adapter reports
+`detected: true`, throws inside `scanThreads` on every poll, and looks healthy in the HUD while
+contributing nothing. The server surfaces it as a warning on the page.
 
 ## The `Thread` your adapter returns
 
@@ -103,7 +102,7 @@ what earns a repo its own zone, and `lastActivityAt` is what sorts the whole map
 | `unread` | boolean | Moved on since you last looked — the astronaut stops and holds a `?` |
 | `hasError` | boolean | Errored — the astronaut slumps, red eyes |
 | `starred` / `routine` / `prState` | | Optional extras; `prState: 'merged'` triggers the confetti |
-| `archived` | boolean | Archived in the harness's own records |
+| `archived` | boolean | Archived in the harness's own records. Read-only — reporting it is all an adapter does |
 | `sizeBytes` | number | Transcript size. **This is how finished a building looks**, on a log scale |
 | `source` | string | Free-form, for your own bookkeeping (the Claude adapter uses `desktop` / `cli`) |
 | `canOpen` / `canArchive` | boolean | Whether this thread supports those actions. The UI greys the buttons out |
@@ -120,8 +119,12 @@ Do not put a file handle, a class instance, or a secret in it.
 
 ## Ground rules
 
-- **Read-only by default.** The one exception in the whole project is the archive flag. A
-  harness's transcripts are somebody's actual work; the colony is a viewer, not an editor.
+- **Read-only. No exceptions.** `data/colony.json` is the only file Bot Crossing writes,
+  anywhere. A harness's transcripts and records are somebody's actual work; the colony is a
+  viewer, not an editor. If an adapter seems to need a write, it does not — say so in an issue.
+- **Never run anything out of another application's bundle.** Not to read from it, not to
+  execute it. Only files under the user's own home directory. Opening a thread goes through a
+  URL the OS resolves, or a command the user already has on `PATH`.
 - **Never block the scan.** It runs on a poll. Cache anything expensive against file mtime —
   see `transcriptMeta` in `claude-code.mjs`, which is what keeps a 12MB transcript from being
   reparsed every few seconds.

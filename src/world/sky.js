@@ -57,6 +57,15 @@ const SKY_FRAG = /* glsl */ `
 `
 
 /** Named times of day. The slider is continuous; these are just the good stops. */
+/**
+ * This machine's wall clock as a day fraction — 0 is midnight, 0.5 is noon, which is exactly
+ * what `timeOfDay` means. Local time on purpose: the point is that the colony's light matches
+ * the light out of your own window, so UTC would be the wrong answer nearly everywhere.
+ */
+export function systemTimeOfDay(now = new Date()) {
+  return (now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) / 86400
+}
+
 export const TIMES = [
   { id: 'dawn', label: 'Dawn', value: 0.255 },
   { id: 'morning', label: 'Morning', value: 0.34 },
@@ -467,9 +476,19 @@ export class Sky {
     this.starUniforms.uTwinkle.value = elapsed
     this._refreshEnvironment()
 
+    // Following the clock beats cycling: both drive the same value, and a cycle running on
+    // top of it would just fight. Re-read every frame rather than on a timer — it is two
+    // divisions, and it means crossing midnight or the machine waking from sleep needs no
+    // special case.
+    if (this.settings.get('clockTime')) {
+      const t = systemTimeOfDay()
+      if (Math.abs(t - this.time) < 1e-5) return false
+      this.setTime(t)
+      return true // the caller re-syncs anything that keys off time
+    }
     if (this.settings.get('autoTime')) {
       this.setTime(this.time + dt / Math.max(20, this.settings.get('dayLength')))
-      return true // the caller re-syncs anything that keys off time
+      return true
     }
     return false
   }
